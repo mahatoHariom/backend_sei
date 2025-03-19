@@ -8,9 +8,13 @@ npm ci
 
 # Create production .env file
 echo "Creating production environment file..."
+
+# Escape special characters in DB_PASSWORD for use in connection string
+ESCAPED_DB_PASSWORD=$(echo "$DB_PASSWORD" | sed 's/[\\&*./+!]/\\&/g')
+
 cat > .env.production << EOL
 PORT=9000
-DATABASE_URL=postgresql://sei_user:${DB_PASSWORD}@localhost:5432/sei_institute
+DATABASE_URL=postgresql://sei_user:${ESCAPED_DB_PASSWORD}@localhost:5432/sei_institute?schema=public
 CLIENT_ENDPOINT="https://seiinstitute.com"
 JWT_SECRET="${JWT_SECRET}"
 ACCESS_TOKEN_EXPIRES="1d"
@@ -33,11 +37,14 @@ fi
 echo "Environment file created with the following variables (sensitive data masked):"
 cat .env | sed 's/\(PASSWORD\|SECRET\|KEY\)=.*/\1=********/g'
 
-# Check if the DATABASE_URL is properly formatted
+# Validate DATABASE_URL format
 if ! grep -q "DATABASE_URL=postgresql://sei_user:" .env; then
   echo "Warning: DATABASE_URL might not be properly set in .env"
+  echo "Current DATABASE_URL value (masked):"
+  grep "DATABASE_URL" .env | sed 's/\(postgresql:\/\/sei_user:\)[^@]*\(@localhost\)/\1*******\2/g'
+  
   echo "Fixing DATABASE_URL in .env file..."
-  sed -i "s|DATABASE_URL=.*|DATABASE_URL=postgresql://sei_user:${DB_PASSWORD}@localhost:5432/sei_institute|g" .env
+  sed -i "s|DATABASE_URL=.*|DATABASE_URL=postgresql://sei_user:${ESCAPED_DB_PASSWORD}@localhost:5432/sei_institute?schema=public|g" .env
   echo "Updated DATABASE_URL in .env"
 fi
 
@@ -48,6 +55,7 @@ npm run build
 echo "Generating Prisma client..."
 npx prisma generate
 
+# Test database connection before migrations
 echo "Testing database connection before migrations..."
 if ! npx prisma db pull --skip-generate; then
   echo "Warning: Database connection test failed. Checking PostgreSQL status..."
@@ -55,16 +63,43 @@ if ! npx prisma db pull --skip-generate; then
   echo "Current user and host information:"
   whoami
   hostname
-  echo "Database user information:"
-  sudo -u postgres psql -c "\du" | grep sei_user
-  echo "Attempting to connect to database directly..."
-  PGPASSWORD="${DB_PASSWORD}" psql -h localhost -U sei_user -d sei_institute -c "\conninfo" || echo "Direct connection failed"
   
-  echo "Fixing database connection issue..."
+  echo "Fixing database connection issues..."
+  
+  # Verify and update database password
+  echo "Updating database user password and permissions..."
   sudo -u postgres psql -c "ALTER USER sei_user WITH PASSWORD '${DB_PASSWORD}';"
+  sudo -u postgres psql -c "ALTER USER sei_user WITH LOGIN SUPERUSER CREATEDB CREATEROLE REPLICATION;"
   sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei_institute TO sei_user;"
   sudo -u postgres psql -d sei_institute -c "GRANT ALL ON SCHEMA public TO sei_user;"
-  echo "Database permissions updated."
+  sudo -u postgres psql -d sei_institute -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO sei_user;"
+  sudo -u postgres psql -d sei_institute -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO sei_user;"
+  sudo -u postgres psql -d sei_institute -c "GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO sei_user;"
+  
+  # Check and update PostgreSQL authentication configuration
+  echo "Checking PostgreSQL authentication configuration..."
+  PG_HBA_CONF=$(sudo -u postgres psql -t -c "SHOW hba_file;")
+  echo "PostgreSQL hba file location: $PG_HBA_CONF"
+  
+  # Modify pg_hba.conf to use md5 authentication for local connections
+  sudo grep -q "host.*all.*all.*md5" "$PG_HBA_CONF" || sudo sed -i '/^host/s/peer/md5/g' "$PG_HBA_CONF"
+  sudo grep -q "host.*all.*all.*md5" "$PG_HBA_CONF" || sudo bash -c "echo 'host all all 127.0.0.1/32 md5' >> $PG_HBA_CONF"
+  
+  # Restart PostgreSQL to apply changes
+  echo "Restarting PostgreSQL to apply configuration changes..."
+  sudo service postgresql restart
+  
+  echo "Retesting database connection after fixes..."
+  if ! npx prisma db pull --skip-generate; then
+    echo "Error: Database connection still failing after attempted fixes."
+    echo "Manual intervention required. Please check:"
+    echo "1. PostgreSQL is running: systemctl status postgresql"
+    echo "2. Database credentials in .env match PostgreSQL"
+    echo "3. PostgreSQL authentication settings in pg_hba.conf"
+    exit 1
+  else
+    echo "Database connection successful after fixes!"
+  fi
 fi
 
 echo "Running database migrations..."

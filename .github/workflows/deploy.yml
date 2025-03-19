@@ -76,6 +76,22 @@ jobs:
             sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei_institute TO sei_user;"
             sudo -u postgres psql -d sei_institute -c "GRANT ALL ON SCHEMA public TO sei_user;"
 
+            # Ensure the database user has proper access to the database
+            sudo -u postgres psql -c "ALTER USER sei_user WITH LOGIN SUPERUSER CREATEDB CREATEROLE REPLICATION;"
+            sudo -u postgres psql -d sei_institute -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO sei_user;"
+            sudo -u postgres psql -d sei_institute -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO sei_user;"
+            sudo -u postgres psql -d sei_institute -c "GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO sei_user;"
+
+            # Verify database connection with the new user
+            echo "Verifying database connection..."
+            PGPASSWORD="${DB_PASSWORD}" psql -h localhost -U sei_user -d sei_institute -c "SELECT 'Database connection successful';" || {
+              echo "Database connection verification failed. Updating authentication settings..."
+              # Update pg_hba.conf to use MD5 authentication for local connections
+              PG_HBA_CONF=$(sudo -u postgres psql -t -c "SHOW hba_file;")
+              sudo grep -q "host.*all.*all.*md5" "$PG_HBA_CONF" || sudo sed -i '/^host/s/peer/md5/g' "$PG_HBA_CONF"
+              sudo service postgresql restart
+            }
+
             echo "Database setup completed successfully!"
 
             # Run application setup script
