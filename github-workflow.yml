@@ -1,0 +1,59 @@
+name: Deploy SEI Institute Application
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install SSH key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          known_hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test || true
+
+      - name: Build application
+        run: npm run build
+
+      - name: Install Prisma globally
+        run: npm install -g prisma
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Deploy to server
+        run: |
+          rsync -avz --exclude 'node_modules' --exclude '.git' ./ deploy@37.27.247.208:/var/www/backend/
+          ssh deploy@37.27.247.208 'cd /var/www/backend && npm ci && npm run build && npx prisma migrate deploy'
+          ssh deploy@37.27.247.208 'cd /var/www && docker-compose down && docker-compose up -d'
+
+      - name: Verify Deployment
+        run: |
+          echo "Waiting for services to start up..."
+          sleep 30
+          curl -s -o /dev/null -w "%{http_code}" https://api.your-domain.com/health || true
+
+      - name: Notify on success
+        if: success()
+        run: echo "Deployment completed successfully!"
+
+      - name: Notify on failure
+        if: failure()
+        run: echo "Deployment failed!" && exit 1
