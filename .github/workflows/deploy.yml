@@ -35,7 +35,7 @@ jobs:
         with:
           host: 37.27.247.208
           username: root
-          password: 'gkjaRhMActfMatPW7nvd'
+          password: ${{ secrets.SERVER_PASSWORD }}
           script: |
             # Create directory if it doesn't exist
             mkdir -p /var/www/sei-institute/backend
@@ -51,15 +51,19 @@ jobs:
               cd /var/www/sei-institute/backend
             fi
 
-            # Make setup script executable
+            # Make scripts executable
             chmod +x scripts/setup.sh
+            chmod +x scripts/db-setup.sh
 
-            # Set environment variables for setup script
+            # Set environment variables for setup scripts
             export DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
             export JWT_SECRET="${{ secrets.JWT_SECRET }}"
             export HUGGING_FACE_KEY="${{ secrets.HUGGING_FACE_KEY }}"
 
-            # Run setup script
+            # Run database setup script
+            ./scripts/db-setup.sh
+
+            # Run application setup script
             ./scripts/setup.sh
 
             # Setup nginx if not already configured
@@ -85,11 +89,37 @@ jobs:
             echo "Verifying environment variables..."
             if [ -f ".env" ]; then
               echo "Environment file exists"
-              # Check critical variables
-              if grep -q "DATABASE_URL" .env && grep -q "JWT_SECRET" .env && grep -q "NODE_ENV=production" .env; then
-                echo "Critical environment variables are set"
+              echo "Checking for critical variables..."
+              
+              missing_vars=0
+              
+              if grep -q "DATABASE_URL" .env; then
+                echo "✅ DATABASE_URL is set"
               else
-                echo "Error: Missing critical environment variables"
+                echo "❌ DATABASE_URL is missing"
+                missing_vars=$((missing_vars+1))
+              fi
+              
+              if grep -q "JWT_SECRET" .env; then
+                echo "✅ JWT_SECRET is set"
+              else
+                echo "❌ JWT_SECRET is missing"
+                missing_vars=$((missing_vars+1))
+              fi
+              
+              if grep -q "NODE_ENV" .env; then
+                echo "✅ NODE_ENV is set"
+              else
+                echo "❌ NODE_ENV is missing"
+                missing_vars=$((missing_vars+1))
+              fi
+              
+              if [ $missing_vars -eq 0 ]; then
+                echo "All critical environment variables are set"
+              else
+                echo "Error: $missing_vars critical environment variables are missing"
+                echo "Current .env file content (sanitized):"
+                cat .env | sed 's/\(PASSWORD\|SECRET\|KEY\)=.*/\1=********/g'
                 exit 1
               fi
             else

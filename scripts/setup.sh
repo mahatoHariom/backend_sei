@@ -43,6 +43,8 @@ if [ -f ".env" ]; then
     echo "Critical environment variables are set"
   else
     echo "Error: Missing critical environment variables"
+    echo "Contents of .env file:"
+    cat .env | grep -v "PASSWORD\|SECRET\|KEY" # Show .env without sensitive data
     exit 1
   fi
 else
@@ -56,6 +58,11 @@ if npx prisma db pull; then
   echo "Database connection successful"
 else
   echo "Error: Database connection failed"
+  echo "Please check that:"
+  echo "1. PostgreSQL is running"
+  echo "2. The database 'sei_institute' exists"
+  echo "3. User 'sei_user' exists with correct password"
+  echo "4. User 'sei_user' has proper permissions"
   exit 1
 fi
 
