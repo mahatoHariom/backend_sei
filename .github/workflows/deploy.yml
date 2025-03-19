@@ -1,0 +1,109 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'backend/package-lock.json'
+
+      - name: Install Dependencies
+        run: npm ci
+        working-directory: ./backend
+
+      - name: Build
+        run: npm run build
+        working-directory: ./backend
+
+      - name: Run Linting
+        run: npm run lint
+        working-directory: ./backend
+
+      - name: Deploy to Server
+        if: github.ref == 'refs/heads/main'
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 37.27.247.208
+          username: root
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            # Create directory if it doesn't exist
+            mkdir -p /var/www/sei-institute/backend
+
+            # Clone/pull the repository
+            if [ -d "/var/www/sei-institute/backend/.git" ]; then
+              cd /var/www/sei-institute/backend
+              git pull origin main
+            else
+              git clone --single-branch --branch main https://github.com/${{ github.repository }}.git /var/www/sei-institute/backend-temp
+              cp -a /var/www/sei-institute/backend-temp/backend/. /var/www/sei-institute/backend/
+              rm -rf /var/www/sei-institute/backend-temp
+              cd /var/www/sei-institute/backend
+            fi
+
+            # Make setup script executable
+            chmod +x scripts/setup.sh
+
+            # Set environment variables for setup script
+            export DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
+            export JWT_SECRET="${{ secrets.JWT_SECRET }}"
+            export HUGGING_FACE_KEY="${{ secrets.HUGGING_FACE_KEY }}"
+
+            # Run setup script
+            ./scripts/setup.sh
+
+            # Setup nginx if not already configured
+            if [ ! -f /etc/nginx/sites-available/backend ]; then
+              echo 'server { 
+                listen 80; 
+                server_name api.seiinstitute.com; 
+                location / { 
+                  proxy_pass http://localhost:9000; 
+                  proxy_http_version 1.1; 
+                  proxy_set_header Upgrade $http_upgrade; 
+                  proxy_set_header Connection "upgrade"; 
+                  proxy_set_header Host $host; 
+                  proxy_cache_bypass $http_upgrade; 
+                } 
+              }' > /etc/nginx/sites-available/backend
+              
+              ln -sf /etc/nginx/sites-available/backend /etc/nginx/sites-enabled/
+              nginx -t && systemctl restart nginx
+            fi
+
+            # Verify environment variables
+            echo "Verifying environment variables..."
+            if [ -f ".env" ]; then
+              echo "Environment file exists"
+              # Check critical variables
+              if grep -q "DATABASE_URL" .env && grep -q "JWT_SECRET" .env && grep -q "NODE_ENV=production" .env; then
+                echo "Critical environment variables are set"
+              else
+                echo "Error: Missing critical environment variables"
+                exit 1
+              fi
+            else
+              echo "Error: Environment file not found"
+              exit 1
+            fi
+
+            # Test database connection
+            echo "Testing database connection..."
+            if npx prisma db pull; then
+              echo "Database connection successful"
+            else
+              echo "Error: Database connection failed"
+              exit 1
+            fi
