@@ -35,7 +35,7 @@ jobs:
         with:
           host: 37.27.247.208
           username: root
-          password: ${{ secrets.SERVER_PASSWORD }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             # Create directory if it doesn't exist
             mkdir -p /var/www/sei-institute/backend
