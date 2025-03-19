@@ -10,7 +10,7 @@
     "format:check": "prettier --check .",
     "prisma:seed": "tsx prisma/seed.ts",
     "format:write": "prettier --write .",
-    "lint": "eslint src/**/*.ts",
+    "lint": "eslint --config .eslintrc.js src/**/*.ts",
     "format": "eslint src/**/*.ts --fix"
   },
   "dependencies": {
