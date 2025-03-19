@@ -35,7 +35,7 @@ jobs:
         with:
           host: 37.27.247.208
           username: root
-          password: ${{ secrets.SERVER_PASSWORD }}
+          password: ${{ secrets.SERVER_SSH_PASSWORD }}
           script: |
             # Create directory if it doesn't exist
             mkdir -p /var/www/sei-institute/backend
@@ -51,50 +51,15 @@ jobs:
               cd /var/www/sei-institute/backend
             fi
 
-            # Make script executable
+            # Make setup script executable
             chmod +x scripts/setup.sh
 
-            # Set environment variables for setup scripts
+            # Set environment variables for setup script
             export DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
             export JWT_SECRET="${{ secrets.JWT_SECRET }}"
             export HUGGING_FACE_KEY="${{ secrets.HUGGING_FACE_KEY }}"
 
-            # Setup database manually
-            echo "Setting up PostgreSQL database..."
-            if ! systemctl is-active --quiet postgresql; then
-              echo "PostgreSQL is not running. Installing and starting..."
-              apt update
-              apt install -y postgresql postgresql-contrib
-              systemctl start postgresql
-              systemctl enable postgresql
-            fi
-
-            # Create database and user with proper permissions
-            sudo -u postgres psql -c "SELECT 1 FROM pg_database WHERE datname = 'sei_institute'" | grep -q 1 || sudo -u postgres psql -c "CREATE DATABASE sei_institute;"
-            sudo -u postgres psql -c "DROP USER IF EXISTS sei_user;"
-            sudo -u postgres psql -c "CREATE USER sei_user WITH ENCRYPTED PASSWORD '${DB_PASSWORD}';"
-            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei_institute TO sei_user;"
-            sudo -u postgres psql -d sei_institute -c "GRANT ALL ON SCHEMA public TO sei_user;"
-
-            # Ensure the database user has proper access to the database
-            sudo -u postgres psql -c "ALTER USER sei_user WITH LOGIN SUPERUSER CREATEDB CREATEROLE REPLICATION;"
-            sudo -u postgres psql -d sei_institute -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO sei_user;"
-            sudo -u postgres psql -d sei_institute -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO sei_user;"
-            sudo -u postgres psql -d sei_institute -c "GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO sei_user;"
-
-            # Verify database connection with the new user
-            echo "Verifying database connection..."
-            PGPASSWORD="${DB_PASSWORD}" psql -h localhost -U sei_user -d sei_institute -c "SELECT 'Database connection successful';" || {
-              echo "Database connection verification failed. Updating authentication settings..."
-              # Update pg_hba.conf to use MD5 authentication for local connections
-              PG_HBA_CONF=$(sudo -u postgres psql -t -c "SHOW hba_file;")
-              sudo grep -q "host.*all.*all.*md5" "$PG_HBA_CONF" || sudo sed -i '/^host/s/peer/md5/g' "$PG_HBA_CONF"
-              sudo service postgresql restart
-            }
-
-            echo "Database setup completed successfully!"
-
-            # Run application setup script
+            # Run setup script
             ./scripts/setup.sh
 
             # Setup nginx if not already configured
@@ -120,37 +85,11 @@ jobs:
             echo "Verifying environment variables..."
             if [ -f ".env" ]; then
               echo "Environment file exists"
-              echo "Checking for critical variables..."
-              
-              missing_vars=0
-              
-              if grep -q "DATABASE_URL" .env; then
-                echo "✅ DATABASE_URL is set"
+              # Check critical variables
+              if grep -q "DATABASE_URL" .env && grep -q "JWT_SECRET" .env && grep -q "NODE_ENV=production" .env; then
+                echo "Critical environment variables are set"
               else
-                echo "❌ DATABASE_URL is missing"
-                missing_vars=$((missing_vars+1))
-              fi
-              
-              if grep -q "JWT_SECRET" .env; then
-                echo "✅ JWT_SECRET is set"
-              else
-                echo "❌ JWT_SECRET is missing"
-                missing_vars=$((missing_vars+1))
-              fi
-              
-              if grep -q "NODE_ENV" .env; then
-                echo "✅ NODE_ENV is set"
-              else
-                echo "❌ NODE_ENV is missing"
-                missing_vars=$((missing_vars+1))
-              fi
-              
-              if [ $missing_vars -eq 0 ]; then
-                echo "All critical environment variables are set"
-              else
-                echo "Error: $missing_vars critical environment variables are missing"
-                echo "Current .env file content (sanitized):"
-                cat .env | sed 's/\(PASSWORD\|SECRET\|KEY\)=.*/\1=********/g'
+                echo "Error: Missing critical environment variables"
                 exit 1
               fi
             else
@@ -164,11 +103,5 @@ jobs:
               echo "Database connection successful"
             else
               echo "Error: Database connection failed"
-              echo "Checking PostgreSQL status and connection..."
-              systemctl status postgresql
-              echo "Attempting to connect to database directly..."
-              sudo -u postgres psql -c "\\l" | grep sei_institute
-              echo "Checking user permissions..."
-              sudo -u postgres psql -c "\\du" | grep sei_user
               exit 1
             fi
