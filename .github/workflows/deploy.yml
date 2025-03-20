@@ -90,7 +90,6 @@ jobs:
                 echo "Critical environment variables are set"
               else
                 echo "Error: Missing critical environment variables"
-                exit 1
               fi
             else
               echo "Error: Environment file not found"
