@@ -25,7 +25,7 @@ npm ci
 # Create production .env file
 cat > .env.production << EOL
 PORT=9000
-DATABASE_URL="postgresql://sei_user:${DB_PASSWORD}@localhost:5432/sei_institute?schema=public"
+DATABASE_URL="postgresql://sei_user:${DB_PASSWORD}@37.27.247.208:5432/sei_institute?schema=public"
 CLIENT_ENDPOINT="https://seiinstitute.com"
 JWT_SECRET="${JWT_SECRET}"
 ACCESS_TOKEN_EXPIRES="1d"

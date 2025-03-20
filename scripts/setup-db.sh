@@ -28,7 +28,7 @@ sudo -u postgres psql -c "ALTER USER $DB_USER WITH SUPERUSER;" # Needed for some
 # Update .env file with database connection string
 if [ -f "/var/www/sei-institute/backend/.env" ]; then
     echo "Updating .env file..."
-    sed -i "s|DATABASE_URL=.*|DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@37.27.247.208:5432:5432/$DB_NAME|g" /var/www/sei-institute/backend/.env
+    sed -i "s|DATABASE_URL=.*|DATABASE_URL=postgresql://$DB_USER:$DB_PASSWORD@37.27.247.208:5432/$DB_NAME|g" /var/www/sei-institute/backend/.env
 fi
 
 echo "Database setup complete!" 
