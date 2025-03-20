@@ -25,83 +25,89 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Comment out linting step temporarily until ESLint configuration is updated
-      # - name: Run Linting
-      #   run: npm run lint
-
       - name: Deploy to Server
         if: github.ref == 'refs/heads/main'
         uses: appleboy/ssh-action@master
         with:
           host: 37.27.247.208
           username: root
-          password: ${{ secrets.SERVER_PASSWORD }}
+          password: gkjaRhMActfMatPW7nvd # Hardcoded password
           script: |
-            # Create directory if it doesn't exist
+            # Create directory structure
             mkdir -p /var/www/sei-institute/backend
 
-            # Clone/pull the repository
+            # Clone/pull repository
             if [ -d "/var/www/sei-institute/backend/.git" ]; then
               cd /var/www/sei-institute/backend
               git pull origin main
             else
-              git clone --single-branch --branch main https://github.com/${{ github.repository }}.git /var/www/sei-institute/backend-temp
-              cp -a /var/www/sei-institute/backend-temp/. /var/www/sei-institute/backend/
-              rm -rf /var/www/sei-institute/backend-temp
+              git clone --single-branch --branch main https://github.com/${{ github.repository }}.git /var/www/sei-institute/backend
               cd /var/www/sei-institute/backend
             fi
 
-            # Make setup script executable
-            chmod +x scripts/setup.sh
+            # Install PostgreSQL if not installed
+            if ! command -v psql &> /dev/null; then
+              apt-get update
+              apt-get install -y postgresql postgresql-contrib
+              systemctl enable postgresql
+              systemctl start postgresql
+            fi
 
-            # Set environment variables for setup script
-            export DB_PASSWORD="mahato"
+            # Setup PostgreSQL
+            sudo -u postgres psql -c "CREATE USER sei_user WITH PASSWORD 'mahato';"
+            sudo -u postgres psql -c "CREATE DATABASE sei_institute OWNER sei_user;"
+            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei_institute TO sei_user;"
+
+            # Set environment variables directly
+            export PORT=9000
+            export DATABASE_URL="postgresql://sei_user:mahato@localhost:5432/sei_institute?schema=public"
+            export CLIENT_ENDPOINT="http://localhost:3000"
             export JWT_SECRET="mahatohariomsfadfnasldkjf"
+            export ACCESS_TOKEN_EXPIRES="1d"
+            export REFRESH_TOKEN_EXPIRES="7d"
+            export NODE_ENV="production"
             export HUGGING_FACE_KEY="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"
 
-            # Run setup script
-            ./scripts/setup.sh
+            # Install dependencies
+            npm ci
 
-            # Setup nginx if not already configured
+            # Run Prisma migrations with hardcoded env
+            npx prisma migrate deploy
+
+            # Setup nginx
             if [ ! -f /etc/nginx/sites-available/backend ]; then
-              echo 'server { 
-                listen 80; 
-                server_name api.seiinstitute.com; 
-                location / { 
-                  proxy_pass http://localhost:9000; 
-                  proxy_http_version 1.1; 
-                  proxy_set_header Upgrade $http_upgrade; 
-                  proxy_set_header Connection "upgrade"; 
-                  proxy_set_header Host $host; 
-                  proxy_cache_bypass $http_upgrade; 
-                } 
-              }' > /etc/nginx/sites-available/backend
-              
+              cat > /etc/nginx/sites-available/backend << EOL
+              server {
+                listen 80;
+                server_name api.seiinstitute.com;
+                location / {
+                  proxy_pass http://localhost:9000;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade \$http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host \$host;
+                  proxy_cache_bypass \$http_upgrade;
+                }
+              }
+              EOL
               ln -sf /etc/nginx/sites-available/backend /etc/nginx/sites-enabled/
               nginx -t && systemctl restart nginx
             fi
 
-            # Verify environment variables
-            echo "Verifying environment variables..."
-            if [ -f ".env" ]; then
-              echo "Environment file exists"
-              # Check critical variables
-              if grep -q "DATABASE_URL" .env && grep -q "JWT_SECRET" .env && grep -q "NODE_ENV=production" .env; then
-                echo "Critical environment variables are set"
-              else
-                echo "Error: Missing critical environment variables"
-            
-              fi
-            else
-              echo "Error: Environment file not found"
-              exit 1
+            # Install PM2 if not installed
+            if ! command -v pm2 &> /dev/null; then
+              npm install -g pm2
             fi
 
-            # Test database connection
-            echo "Testing database connection..."
-            if npx prisma db pull; then
-              echo "Database connection successful"
-            else
-              echo "Error: Database connection failed"
-              exit 1
-            fi
+            # Start/Restart application with environment variables
+            pm2 delete backend || true
+            pm2 start build/server.js --name backend \
+              --env PORT=9000 \
+              --env DATABASE_URL="postgresql://sei_user:mahato@localhost:5432/sei_institute?schema=public" \
+              --env CLIENT_ENDPOINT="http://localhost:3000" \
+              --env JWT_SECRET="mahatohariomsfadfnasldkjf" \
+              --env ACCESS_TOKEN_EXPIRES="1d" \
+              --env REFRESH_TOKEN_EXPIRES="7d" \
+              --env NODE_ENV="production" \
+              --env HUGGING_FACE_KEY="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"
+            pm2 save
