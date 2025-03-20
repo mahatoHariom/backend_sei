@@ -31,7 +31,7 @@ jobs:
         with:
           host: 37.27.247.208
           username: root
-          password: gkjaRhMActfMatPW7nvd # Hardcoded password
+          password: gkjaRhMActfMatPW7nvd
           script: |
             # Create directory structure
             mkdir -p /var/www/sei-institute/backend
@@ -53,15 +53,15 @@ jobs:
               systemctl start postgresql
             fi
 
-            # Setup PostgreSQL
-            sudo -u postgres psql -c "CREATE USER sei_user WITH PASSWORD 'mahato';"
-            sudo -u postgres psql -c "CREATE DATABASE sei_institute OWNER sei_user;"
-            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei_institute TO sei_user;"
+            # Setup PostgreSQL with stronger credentials
+            sudo -u postgres psql -c "DO \$\$ BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'sei_prod_user') THEN ALTER ROLE sei_prod_user WITH PASSWORD 'StrongP@ssw0rd123'; ELSE CREATE USER sei_prod_user WITH PASSWORD 'StrongP@ssw0rd123'; END IF; END \$\$;"
+            sudo -u postgres psql -c "CREATE DATABASE sei_institute OWNER sei_prod_user;"
+            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei_institute TO sei_prod_user;"
 
-            # Set environment variables directly
+            # Set production environment variables
             export PORT=9000
-            export DATABASE_URL="postgresql://sei_user:mahato@localhost:5432/sei_institute?schema=public"
-            export CLIENT_ENDPOINT="http://localhost:3000"
+            export DATABASE_URL="postgresql://sei_prod_user:StrongP@ssw0rd123@37.27.247.208:5432/sei_institute?schema=public"
+            export CLIENT_ENDPOINT="https://sei-institute.com"  # Update to your actual frontend URL
             export JWT_SECRET="mahatohariomsfadfnasldkjf"
             export ACCESS_TOKEN_EXPIRES="1d"
             export REFRESH_TOKEN_EXPIRES="7d"
@@ -71,21 +71,23 @@ jobs:
             # Install dependencies
             npm ci
 
-            # Run Prisma migrations with hardcoded env
+            # Run Prisma migrations
             npx prisma migrate deploy
 
-            # Setup nginx
+            # Setup nginx with production config
             if [ ! -f /etc/nginx/sites-available/backend ]; then
               cat > /etc/nginx/sites-available/backend << EOL
               server {
                 listen 80;
                 server_name api.seiinstitute.com;
                 location / {
-                  proxy_pass http://localhost:9000;
+                  proxy_pass http://127.0.0.1:9000;
                   proxy_http_version 1.1;
                   proxy_set_header Upgrade \$http_upgrade;
                   proxy_set_header Connection "upgrade";
                   proxy_set_header Host \$host;
+                  proxy_set_header X-Real-IP \$remote_addr;
+                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
                   proxy_cache_bypass \$http_upgrade;
                 }
               }
@@ -99,12 +101,12 @@ jobs:
               npm install -g pm2
             fi
 
-            # Start/Restart application with environment variables
+            # Start/Restart application with production environment variables
             pm2 delete backend || true
             pm2 start build/server.js --name backend \
               --env PORT=9000 \
-              --env DATABASE_URL="postgresql://sei_user:mahato@localhost:5432/sei_institute?schema=public" \
-              --env CLIENT_ENDPOINT="http://localhost:3000" \
+              --env DATABASE_URL="postgresql://sei_prod_user:StrongP@ssw0rd123@37.27.247.208:5432/sei_institute?schema=public" \
+              --env CLIENT_ENDPOINT="https://sei-institute.com" \
               --env JWT_SECRET="mahatohariomsfadfnasldkjf" \
               --env ACCESS_TOKEN_EXPIRES="1d" \
               --env REFRESH_TOKEN_EXPIRES="7d" \
