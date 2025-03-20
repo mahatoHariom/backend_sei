@@ -57,72 +57,85 @@ jobs:
             systemctl start postgresql
             sleep 5 # Give PostgreSQL time to start
 
-            # Configure PostgreSQL
-            echo "mahato" | sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'mahato';" || true
-            echo "local all postgres md5" > /etc/postgresql/*/main/pg_hba.conf
-            echo "host all all 127.0.0.1/32 md5" >> /etc/postgresql/*/main/pg_hba.conf
+            # Fix PostgreSQL authentication configuration
+            sudo sed -i 's/local\s\+all\s\+postgres\s\+peer/local all postgres md5/g' /etc/postgresql/*/main/pg_hba.conf
+            sudo sed -i 's/host\s\+all\s\+all\s\+127.0.0.1\/32\s\+peer/host all all 127.0.0.1\/32 md5/g' /etc/postgresql/*/main/pg_hba.conf
             systemctl restart postgresql
             sleep 5 # Give time for restart
 
-            # Setup database with error checking
-            sudo -u postgres psql -c "DO \$\$ BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'sei_prod_user') THEN ALTER ROLE sei_prod_user WITH PASSWORD 'StrongP@ssw0rd123'; ELSE CREATE USER sei_prod_user WITH PASSWORD 'StrongP@ssw0rd123'; END IF; END \$\$;"
-            sudo -u postgres psql -c "DROP DATABASE IF EXISTS sei_institute;" || true
-            sudo -u postgres psql -c "CREATE DATABASE sei_institute OWNER sei_prod_user;"
-            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei_institute TO sei_prod_user;"
+            # Set postgres password
+            echo "ALTER USER postgres WITH PASSWORD 'mahato';" | sudo -u postgres psql
 
-            # Set production environment variables
-            export PORT=9000
-            export DATABASE_URL="postgresql://sei_prod_user:StrongP@ssw0rd123@127.0.0.1:5432/sei_institute?schema=public"
-            export CLIENT_ENDPOINT="https://sei-institute.com"
-            export JWT_SECRET="mahatohariomsfadfnasldkjf"
-            export ACCESS_TOKEN_EXPIRES="1d"
-            export REFRESH_TOKEN_EXPIRES="7d"
-            export NODE_ENV="production"
-            export HUGGING_FACE_KEY="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"
+            # Setup database user and permissions
+            sudo -u postgres psql <<EOD
+            DO \$\$
+            BEGIN
+              IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'sei_prod_user') THEN
+                ALTER ROLE sei_prod_user WITH PASSWORD 'StrongP@ssw0rd123';
+              ELSE
+                CREATE USER sei_prod_user WITH PASSWORD 'StrongP@ssw0rd123';
+              END IF;
+            END
+            \$\$;
+            DROP DATABASE IF EXISTS sei_institute;
+            CREATE DATABASE sei_institute;
+            GRANT ALL PRIVILEGES ON DATABASE sei_institute TO sei_prod_user;
+            \c sei_institute
+            GRANT ALL ON SCHEMA public TO sei_prod_user;
+            EOD
+
+            # Set production environment variables in .env file
+            cat > /var/www/sei-institute/backend/.env <<EOD
+            PORT=9000
+            DATABASE_URL="postgresql://sei_prod_user:StrongP@ssw0rd123@127.0.0.1:5432/sei_institute?schema=public"
+            CLIENT_ENDPOINT="https://sei-institute.com"
+            JWT_SECRET="mahatohariomsfadfnasldkjf"
+            ACCESS_TOKEN_EXPIRES="1d"
+            REFRESH_TOKEN_EXPIRES="7d"
+            NODE_ENV="production"
+            HUGGING_FACE_KEY="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"
+            EOD
+
+            # Navigate to project directory
+            cd /var/www/sei-institute/backend
 
             # Install dependencies and fix vulnerabilities
             npm ci
             npm audit fix --force
 
             # Run Prisma migrations
+            npx prisma generate
             npx prisma migrate deploy
 
-            # Setup nginx with proper heredoc
-            if [ ! -f /etc/nginx/sites-available/backend ]; then
-              cat << 'EOF' > /etc/nginx/sites-available/backend
-              server {
-                listen 80;
-                server_name api.seiinstitute.com;
-                location / {
-                  proxy_pass http://127.0.0.1:9000;
-                  proxy_http_version 1.1;
-                  proxy_set_header Upgrade $http_upgrade;
-                  proxy_set_header Connection "upgrade";
-                  proxy_set_header Host $host;
-                  proxy_set_header X-Real-IP $remote_addr;
-                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                  proxy_cache_bypass $http_upgrade;
-                }
+            # Setup nginx configuration
+            cat > /etc/nginx/sites-available/backend <<'EOD'
+            server {
+              listen 80;
+              server_name api.seiinstitute.com;
+              
+              location / {
+                proxy_pass http://127.0.0.1:9000;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "upgrade";
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_cache_bypass $http_upgrade;
               }
-              EOF
-              ln -sf /etc/nginx/sites-available/backend /etc/nginx/sites-enabled/
-              nginx -t && systemctl restart nginx
-            fi
+            }
+            EOD
+
+            # Enable site and restart nginx if config is valid
+            ln -sf /etc/nginx/sites-available/backend /etc/nginx/sites-enabled/
+            nginx -t && systemctl restart nginx
 
             # Install PM2 if not installed
             if ! command -v pm2 &> /dev/null; then
               npm install -g pm2
             fi
 
-            # Start/Restart application
+            # Start/Restart application using .env file
             pm2 delete backend || true
-            pm2 start build/server.js --name backend \
-              --env PORT=9000 \
-              --env DATABASE_URL="postgresql://sei_prod_user:StrongP@ssw0rd123@127.0.0.1:5432/sei_institute?schema=public" \
-              --env CLIENT_ENDPOINT="https://sei-institute.com" \
-              --env JWT_SECRET="mahatohariomsfadfnasldkjf" \
-              --env ACCESS_TOKEN_EXPIRES="1d" \
-              --env REFRESH_TOKEN_EXPIRES="7d" \
-              --env NODE_ENV="production" \
-              --env HUGGING_FACE_KEY="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"
+            cd /var/www/sei-institute/backend && pm2 start build/server.js --name backend
             pm2 save
