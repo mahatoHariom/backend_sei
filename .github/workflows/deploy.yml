@@ -53,6 +53,11 @@ jobs:
               systemctl start postgresql
             fi
 
+            # Configure PostgreSQL to listen on all interfaces
+            echo "listen_addresses = '*'" >> /etc/postgresql/*/main/postgresql.conf
+            echo "host all all 0.0.0.0/0 md5" >> /etc/postgresql/*/main/pg_hba.conf
+            systemctl restart postgresql
+
             # Setup PostgreSQL with stronger credentials
             sudo -u postgres psql -c "DO \$\$ BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'sei_prod_user') THEN ALTER ROLE sei_prod_user WITH PASSWORD 'StrongP@ssw0rd123'; ELSE CREATE USER sei_prod_user WITH PASSWORD 'StrongP@ssw0rd123'; END IF; END \$\$;"
             sudo -u postgres psql -c "CREATE DATABASE sei_institute OWNER sei_prod_user;"
@@ -61,34 +66,35 @@ jobs:
             # Set production environment variables
             export PORT=9000
             export DATABASE_URL="postgresql://sei_prod_user:StrongP@ssw0rd123@37.27.247.208:5432/sei_institute?schema=public"
-            export CLIENT_ENDPOINT="https://sei-institute.com"  # Update to your actual frontend URL
+            export CLIENT_ENDPOINT="https://sei-institute.com"
             export JWT_SECRET="mahatohariomsfadfnasldkjf"
             export ACCESS_TOKEN_EXPIRES="1d"
             export REFRESH_TOKEN_EXPIRES="7d"
             export NODE_ENV="production"
             export HUGGING_FACE_KEY="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"
 
-            # Install dependencies
+            # Install dependencies and update packages
             npm ci
+            npm audit fix
 
             # Run Prisma migrations
             npx prisma migrate deploy
 
-            # Setup nginx with production config
+            # Setup nginx with proper EOF
             if [ ! -f /etc/nginx/sites-available/backend ]; then
-              cat > /etc/nginx/sites-available/backend << EOL
+              cat > /etc/nginx/sites-available/backend << 'EOL'
               server {
                 listen 80;
                 server_name api.seiinstitute.com;
                 location / {
                   proxy_pass http://127.0.0.1:9000;
                   proxy_http_version 1.1;
-                  proxy_set_header Upgrade \$http_upgrade;
+                  proxy_set_header Upgrade $http_upgrade;
                   proxy_set_header Connection "upgrade";
-                  proxy_set_header Host \$host;
-                  proxy_set_header X-Real-IP \$remote_addr;
-                  proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                  proxy_cache_bypass \$http_upgrade;
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_cache_bypass $http_upgrade;
                 }
               }
               EOL
@@ -101,7 +107,7 @@ jobs:
               npm install -g pm2
             fi
 
-            # Start/Restart application with production environment variables
+            # Start/Restart application
             pm2 delete backend || true
             pm2 start build/server.js --name backend \
               --env PORT=9000 \
