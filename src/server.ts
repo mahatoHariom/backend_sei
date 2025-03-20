@@ -10,6 +10,7 @@ const startServer = async () => {
     console.log(`HTTP server running on http://localhost:${process.env.PORT}`)
   } catch (err) {
     console.error('Error starting server:', err)
+    
     process.exit(1)
   }
 }
