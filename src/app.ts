@@ -18,6 +18,7 @@ import CheckAdminRole from './app/middlewares/check-admin'
 
 const createApp = async (): Promise<FastifyInstance> => {
   // Load environment variables
+  
   loadEnvironment()
 
   // Initialize Fastify with logger
