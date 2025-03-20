@@ -31,11 +31,11 @@ jobs:
 
       - name: Deploy to Server
         if: github.ref == 'refs/heads/main'
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@master
         with:
           host: 37.27.247.208
           username: root
-          password: ${{ secrets.SERVER_SSH_PASSWORD }}
+          password: gkjaRhMActfMatPW7nvd
           script: |
             # Create directory if it doesn't exist
             mkdir -p /var/www/sei-institute/backend
