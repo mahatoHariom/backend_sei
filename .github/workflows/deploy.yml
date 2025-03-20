@@ -35,7 +35,7 @@ jobs:
         with:
           host: 37.27.247.208
           username: root
-          password: gkjaRhMActfMatPW7nvd
+          password: ${{ secrets.SERVER_PASSWORD }}
           script: |
             # Create directory if it doesn't exist
             mkdir -p /var/www/sei-institute/backend
@@ -55,9 +55,9 @@ jobs:
             chmod +x scripts/setup.sh
 
             # Set environment variables for setup script
-            export DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
-            export JWT_SECRET="${{ secrets.JWT_SECRET }}"
-            export HUGGING_FACE_KEY="${{ secrets.HUGGING_FACE_KEY }}"
+            export DB_PASSWORD="mahato"
+            export JWT_SECRET="mahatohariomsfadfnasldkjf"
+            export HUGGING_FACE_KEY="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"
 
             # Run setup script
             ./scripts/setup.sh
