@@ -36,10 +36,11 @@ jobs:
             # Create directory structure
             mkdir -p /var/www/sei-institute/backend
 
-            # Clone/pull repository
+            # Clone/pull repository with force to avoid merge conflicts
             if [ -d "/var/www/sei-institute/backend/.git" ]; then
               cd /var/www/sei-institute/backend
-              git pull origin main
+              git fetch origin
+              git reset --hard origin/main
             else
               git clone --single-branch --branch main https://github.com/${{ github.repository }}.git /var/www/sei-institute/backend
               cd /var/www/sei-institute/backend
@@ -53,19 +54,22 @@ jobs:
               systemctl start postgresql
             fi
 
-            # Configure PostgreSQL to listen on all interfaces
-            echo "listen_addresses = '*'" >> /etc/postgresql/*/main/postgresql.conf
-            echo "host all all 0.0.0.0/0 md5" >> /etc/postgresql/*/main/pg_hba.conf
+            # Set postgres password and configure
+            echo "mahato" | sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'mahato';"
+            sed -i "s/#password_encryption = md5/password_encryption = md5/" /etc/postgresql/*/main/postgresql.conf
+            echo "host all all 127.0.0.1/32 md5" > /etc/postgresql/*/main/pg_hba.conf
+            echo "host all all ::1/128 md5" >> /etc/postgresql/*/main/pg_hba.conf
             systemctl restart postgresql
 
-            # Setup PostgreSQL with stronger credentials
+            # Setup database
             sudo -u postgres psql -c "DO \$\$ BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'sei_prod_user') THEN ALTER ROLE sei_prod_user WITH PASSWORD 'StrongP@ssw0rd123'; ELSE CREATE USER sei_prod_user WITH PASSWORD 'StrongP@ssw0rd123'; END IF; END \$\$;"
+            sudo -u postgres psql -c "DROP DATABASE IF EXISTS sei_institute;"
             sudo -u postgres psql -c "CREATE DATABASE sei_institute OWNER sei_prod_user;"
             sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei_institute TO sei_prod_user;"
 
             # Set production environment variables
             export PORT=9000
-            export DATABASE_URL="postgresql://sei_prod_user:StrongP@ssw0rd123@37.27.247.208:5432/sei_institute?schema=public"
+            export DATABASE_URL="postgresql://sei_prod_user:StrongP@ssw0rd123@127.0.0.1:5432/sei_institute?schema=public"
             export CLIENT_ENDPOINT="https://sei-institute.com"
             export JWT_SECRET="mahatohariomsfadfnasldkjf"
             export ACCESS_TOKEN_EXPIRES="1d"
@@ -73,14 +77,14 @@ jobs:
             export NODE_ENV="production"
             export HUGGING_FACE_KEY="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"
 
-            # Install dependencies and update packages
+            # Install dependencies and fix vulnerabilities
             npm ci
-            npm audit fix
+            npm audit fix --force
 
             # Run Prisma migrations
             npx prisma migrate deploy
 
-            # Setup nginx with proper EOF
+            # Setup nginx
             if [ ! -f /etc/nginx/sites-available/backend ]; then
               cat > /etc/nginx/sites-available/backend << 'EOL'
               server {
@@ -111,7 +115,7 @@ jobs:
             pm2 delete backend || true
             pm2 start build/server.js --name backend \
               --env PORT=9000 \
-              --env DATABASE_URL="postgresql://sei_prod_user:StrongP@ssw0rd123@37.27.247.208:5432/sei_institute?schema=public" \
+              --env DATABASE_URL="postgresql://sei_prod_user:StrongP@ssw0rd123@127.0.0.1:5432/sei_institute?schema=public" \
               --env CLIENT_ENDPOINT="https://sei-institute.com" \
               --env JWT_SECRET="mahatohariomsfadfnasldkjf" \
               --env ACCESS_TOKEN_EXPIRES="1d" \
