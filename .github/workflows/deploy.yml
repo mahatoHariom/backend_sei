@@ -107,11 +107,39 @@ jobs:
             npx prisma generate
             npx prisma migrate deploy
 
+            # Copy SSL setup script from frontend if it exists
+            if [ -f "/var/www/sei-institute/client/scripts/ssl-setup.sh" ]; then
+              cp /var/www/sei-institute/client/scripts/ssl-setup.sh /var/www/sei-institute/backend/
+              chmod +x /var/www/sei-institute/backend/ssl-setup.sh
+              ./ssl-setup.sh
+            else
+              # Install certbot if not already installed
+              if ! command -v certbot &> /dev/null; then
+                apt-get update
+                apt-get install -y certbot python3-certbot-nginx
+              fi
+              
+              # Set up SSL certificates for API domain
+              certbot --nginx -d api.seiinstitute.com --non-interactive --agree-tos --email admin@seiinstitute.com
+            fi
+
             # Setup nginx configuration
             cat > /etc/nginx/sites-available/backend <<'EOD'
             server {
               listen 80;
               server_name api.seiinstitute.com;
+              
+              # Redirect HTTP to HTTPS
+              return 301 https://$host$request_uri;
+            }
+
+            server {
+              listen 443 ssl;
+              server_name api.seiinstitute.com;
+              
+              # SSL certificate configuration
+              ssl_certificate /etc/letsencrypt/live/api.seiinstitute.com/fullchain.pem;
+              ssl_certificate_key /etc/letsencrypt/live/api.seiinstitute.com/privkey.pem;
               
               location / {
                 proxy_pass http://127.0.0.1:9000;
