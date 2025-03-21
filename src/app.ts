@@ -13,6 +13,7 @@ import fastifyStatic from '@fastify/static'
 import path from 'path'
 import CheckAdminRole from './app/middlewares/check-admin'
 
+
 /**
  * Creates and configures the Fastify application
  */
