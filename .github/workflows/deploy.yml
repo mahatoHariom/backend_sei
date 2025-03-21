@@ -56,6 +56,42 @@ jobs:
               git reset --hard origin/main
             fi
 
+            # Debug repository contents
+            echo "Checking repository structure..."
+            ls -la $DEPLOY_DIR
+            echo "Checking backend directory..."
+            ls -la $DEPLOY_DIR/backend
+            echo "Checking prisma directory..."
+            ls -la $DEPLOY_DIR/backend/prisma || echo "Prisma directory not found!"
+
+            # Make sure prisma directory exists
+            if [ ! -d "$DEPLOY_DIR/backend/prisma" ]; then
+              echo "Creating prisma directory..."
+              mkdir -p $DEPLOY_DIR/backend/prisma
+            fi
+
+            # Copy schema.prisma if it doesn't exist
+            if [ ! -f "$DEPLOY_DIR/backend/prisma/schema.prisma" ]; then
+              echo "schema.prisma not found, creating it..."
+              # Create a basic schema.prisma file - you may need to adjust this based on your actual schema
+              cat > $DEPLOY_DIR/backend/prisma/schema.prisma << 'EOD'
+              generator client {
+                provider = "prisma-client-js"
+              }
+              
+              datasource db {
+                provider = "postgresql"
+                url      = env("DATABASE_URL")
+              }
+              EOD
+              
+              # Also check if schema exists in node_modules
+              if [ -f "$DEPLOY_DIR/backend/node_modules/.prisma/client/schema.prisma" ]; then
+                echo "Found schema in node_modules, copying it..."
+                cp $DEPLOY_DIR/backend/node_modules/.prisma/client/schema.prisma $DEPLOY_DIR/backend/prisma/schema.prisma
+              fi
+            fi
+
             # Navigate to the backend directory
             cd $DEPLOY_DIR/backend
             BACKEND_DIR="$DEPLOY_DIR/backend"
@@ -108,6 +144,10 @@ jobs:
               echo "Error: schema.prisma not found in $BACKEND_DIR/prisma/"
               exit 1
             fi
+
+            # Check and display Prisma schema content
+            echo "Prisma schema content:"
+            cat $BACKEND_DIR/prisma/schema.prisma
 
             # Run Prisma commands
             npx prisma generate --schema=$BACKEND_DIR/prisma/schema.prisma
