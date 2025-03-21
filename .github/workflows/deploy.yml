@@ -44,19 +44,51 @@ jobs:
             apt-get update
             apt-get install -y postgresql nginx
 
-            # 3. Setup PostgreSQL
-            # Create user and database
-            sudo -u postgres psql -c "CREATE USER sei WITH PASSWORD 'sei';" 2>/dev/null || sudo -u postgres psql -c "ALTER USER sei WITH PASSWORD 'sei';" 2>/dev/null
-            sudo -u postgres psql -c "DROP DATABASE IF EXISTS sei;" 2>/dev/null || true
-            sudo -u postgres psql -c "CREATE DATABASE sei;" 2>/dev/null || sudo -u postgres createdb sei
-            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;" 2>/dev/null || true
+            # 3. Setup PostgreSQL - Fix for password prompt loop
+            # First, set postgres user password to 'mahato'
+            echo "Setting postgres user password..."
+            sudo -i -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'mahato';"
+            
+            # Create application database user
+            echo "Creating application database user..."
+            sudo -i -u postgres psql -c "CREATE USER sei WITH PASSWORD 'mahato';" 2>/dev/null || sudo -i -u postgres psql -c "ALTER USER sei WITH PASSWORD 'mahato';" 2>/dev/null
+            
+            # Create database
+            echo "Creating database..."
+            sudo -i -u postgres psql -c "DROP DATABASE IF EXISTS sei;" 2>/dev/null || true
+            sudo -i -u postgres psql -c "CREATE DATABASE sei;" 2>/dev/null || sudo -i -u postgres createdb sei
+            
+            # Grant privileges
+            echo "Setting database privileges..."
+            sudo -i -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;" 2>/dev/null || true
 
-            # Configure PostgreSQL authentication
+            # Configure PostgreSQL authentication without appending duplicate entries
+            echo "Configuring PostgreSQL authentication..."
             PG_HBA_PATH=$(find /etc/postgresql -name "pg_hba.conf" | head -n 1)
             if [ -f "$PG_HBA_PATH" ]; then
-              echo "local   all   sei   md5" >> "$PG_HBA_PATH"
-              echo "host    all   sei   127.0.0.1/32   md5" >> "$PG_HBA_PATH"
-              service postgresql restart
+              # Back up original file
+              cp "$PG_HBA_PATH" "${PG_HBA_PATH}.backup"
+              
+              # Create new configuration
+              cat > "$PG_HBA_PATH" <<'EOF'
+# PostgreSQL Client Authentication Configuration File
+# Database administrative login by Unix domain socket
+local   all             postgres                                peer
+# TYPE  DATABASE        USER            ADDRESS                 METHOD
+# "local" is for Unix domain socket connections only
+local   all             all                                     peer
+# IPv4 local connections:
+host    all             all             127.0.0.1/32            md5
+# IPv6 local connections:
+host    all             all             ::1/128                 md5
+# Allow sei user with password
+local   all             sei                                     md5
+host    all             sei             127.0.0.1/32            md5
+EOF
+              
+              # Restart PostgreSQL to apply changes
+              systemctl restart postgresql
+              echo "PostgreSQL configuration updated and service restarted."
             fi
 
             # 4. Setup Nginx
@@ -83,7 +115,7 @@ jobs:
             # 5. Setup environment
             cat > /var/www/sei-institute/backend/.env <<'EOF'
             PORT=9000
-            DATABASE_URL="postgresql://sei:sei@127.0.0.1:5432/sei?schema=public"
+            DATABASE_URL="postgresql://sei:mahato@127.0.0.1:5432/sei?schema=public"
             CLIENT_ENDPOINT="https://seiinstitute.com"
             JWT_SECRET="mahatohariomsfadfnasldkjf"
             NODE_ENV="production"
@@ -97,8 +129,17 @@ jobs:
               npm install -g pm2
             fi
 
-            # 7. Copy application files
-            echo "Deploying application files..."
+            # 7. Create minimal schema.prisma file
+            cat > /var/www/sei-institute/backend/prisma/schema.prisma <<'EOF'
+            datasource db {
+              provider = "postgresql"
+              url      = env("DATABASE_URL")
+            }
+            
+            generator client {
+              provider = "prisma-client-js"
+            }
+            EOF
 
             # 8. Deploy application
             cd /var/www/sei-institute/backend
