@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["fullTextSearch"]
@@ -12,14 +9,10 @@ datasource db {
 }
 
 model Carousel {
-  id          String   @id @default(uuid())
-  title       String
-  description String?
-  imageUrl    String
-  link        String?
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id        String   @id @default(uuid())
+  publicId  String   @map("public_id")
+  url       String
+  createdAt DateTime @default(now())
 }
 
 model Contact {
@@ -34,19 +27,19 @@ model Contact {
 }
 
 model User {
-  id             String        @id @default(uuid())
-  email          String        @unique
-  fullName       String        @map("name")
-  hashedPassword String
-  isVerified     Boolean       @default(false)
-  role           UserRole      @default(USER)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
-  userDetail     UserDetail?   @relation("UserDetailRelation")
-  contacts       Contact[]     @relation("UserContacts")
-  subjects       UserSubject[]
-  PdfFile        PdfFile[]
-  Practice       Practice[]
+  id         String        @id @default(cuid())
+  fullName   String        @map("name")
+  email      String        @unique
+  password   String
+  isVerified Boolean       @default(false)
+  role       UserRole      @default(user)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  userDetail UserDetail?   @relation("UserDetailRelation")
+  contacts   Contact[]     @relation("UserContacts")
+  subjects   UserSubject[]
+  PdfFile    PdfFile[]
+  Practice   Practice[]
 }
 
 model Subject {
@@ -146,6 +139,6 @@ enum Difficulty {
 }
 
 enum UserRole {
-  ADMIN
-  USER
+  admin
+  user
 }

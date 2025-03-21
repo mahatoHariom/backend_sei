@@ -87,10 +87,11 @@ jobs:
             # 5. Setup PostgreSQL user and database
             echo "Setting up PostgreSQL user and database..."
             sudo -u postgres psql -c "DROP ROLE IF EXISTS sei;" 2>/dev/null || true
-            sudo -u postgres psql -c "CREATE ROLE sei WITH LOGIN PASSWORD 'sei' CREATEDB;" 2>/dev/null || true
+            sudo -u postgres psql -c "CREATE ROLE sei WITH LOGIN PASSWORD 'sei' CREATEDB CREATEROLE SUPERUSER;" 2>/dev/null || true
             sudo -u postgres psql -c "DROP DATABASE IF EXISTS sei;" 2>/dev/null || true
             sudo -u postgres psql -c "CREATE DATABASE sei OWNER sei;" 2>/dev/null || sudo -u postgres createdb -O sei sei
             sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;"
+            sudo -u postgres psql -c "ALTER USER sei WITH CREATEDB;"
 
             # Verify database creation
             if sudo -u postgres psql -l | grep -q sei; then
@@ -104,12 +105,21 @@ jobs:
             # Configure PostgreSQL authentication
             PG_HBA_PATH=$(find /etc/postgresql -name "pg_hba.conf" | head -n 1)
             if [ -f "$PG_HBA_PATH" ]; then
-              if ! grep -q "local.*sei.*md5" "$PG_HBA_PATH"; then
-                echo "local   all   sei   md5" >> "$PG_HBA_PATH"
-              fi
-              if ! grep -q "host.*sei.*127.0.0.1/32.*md5" "$PG_HBA_PATH"; then
-                echo "host    all   sei   127.0.0.1/32   md5" >> "$PG_HBA_PATH"
-              fi
+              # Backup original configuration
+              cp "$PG_HBA_PATH" "${PG_HBA_PATH}.bak"
+              
+              # Update authentication rules for the sei user
+              sed -i '/^local.*sei/d' "$PG_HBA_PATH"
+              sed -i '/^host.*sei.*127.0.0.1/d' "$PG_HBA_PATH"
+              
+              # Add specific authentication rules for sei user
+              echo "local   all   sei   md5" >> "$PG_HBA_PATH"
+              echo "host    all   sei   127.0.0.1/32   md5" >> "$PG_HBA_PATH"
+              echo "host    all   sei   ::1/128   md5" >> "$PG_HBA_PATH"
+              
+              # Add trust authentication for localhost during deployment
+              echo "local   all   postgres   trust" >> "$PG_HBA_PATH"
+              
               systemctl restart postgresql@16-main
               echo "✅ PostgreSQL authentication configured."
             else
@@ -214,7 +224,14 @@ jobs:
               npx prisma migrate deploy || { echo "❌ Migrate deploy failed"; npx prisma migrate status; exit 1; }
             else
               echo "No migrations found. Creating initial migration..."
-              npx prisma migrate dev --name init --create-only || { echo "❌ Migrate dev failed"; cat prisma/schema.prisma; exit 1; }
+              # First try with the --create-only flag to avoid shadow DB issues
+              npx prisma migrate dev --name init --create-only || { 
+                echo "❌ Could not create migration with --create-only flag"
+                # Give the sei user superuser permission temporarily for this operation
+                sudo -u postgres psql -c "ALTER USER sei WITH SUPERUSER;"
+                # Now try the migration again
+                npx prisma migrate dev --name init || { echo "❌ Migrate dev failed even with superuser privileges"; exit 1; }
+              }
               npx prisma migrate deploy || { echo "❌ Migrate deploy failed after init"; npx prisma migrate status; exit 1; }
             fi
 
