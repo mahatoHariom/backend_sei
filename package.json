@@ -2,13 +2,18 @@
   "name": "03-api-solid",
   "version": "1.0.0",
   "main": "index.js",
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
   "scripts": {
     "start:dev": "tsx watch src/server.ts",
     "start": "node build/server.js",
-    "build": "tsup src --out-dir build",
+    "build": "tsup src --out-dir build && cp -r prisma build/",
     "pretty": "prettier --write .",
     "format:check": "prettier --check .",
     "prisma:seed": "tsx prisma/seed.ts",
+    "prisma:migrate:dev": "prisma migrate dev && npm run prisma:seed",
+    "prisma:deploy": "prisma migrate deploy && npm run prisma:seed",
     "format:write": "prettier --write .",
     "lint": "eslint --config .eslintrc.js src/**/*.ts",
     "format": "eslint src/**/*.ts --fix"
