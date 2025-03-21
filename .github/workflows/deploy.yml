@@ -30,14 +30,6 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Ensure Prisma Schema
-        run: |
-          # Make sure the prisma directory exists in the build
-          mkdir -p build/prisma
-          cp prisma/schema.prisma build/prisma/
-          cp -r prisma/* build/prisma/
-          ls -la build/prisma
-
       - name: Archive Build
         run: tar -czf backend.tar.gz build package.json package-lock.json prisma src
 
@@ -280,7 +272,7 @@ jobs:
             if [ $? -eq 0 ]; then
               pm2 restart backend
             else
-              pm2 start build/server.js --name backend
+              pm2 start npm --name backend -- start
             fi
             pm2 save
 

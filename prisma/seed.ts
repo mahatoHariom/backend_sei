@@ -73,8 +73,6 @@ async function main() {
         data: {
           fullName: 'Admin User',
           email: 'admin@gmail.com',
-          // hashedPassword: hashedPassword,
-
           password: hashedPassword,
           isVerified: true,
           role: 'ADMIN'

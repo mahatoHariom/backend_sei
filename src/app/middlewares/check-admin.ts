@@ -8,7 +8,7 @@ const CheckAdminRole = (server: FastifyInstance) => {
       throw new ApiError(Messages.USER_NOT_AUTHENTICATED, StatusCode.Unauthorized)
     }
     const user = req.user
-    if (user.role !== 'admin') {
+    if (user.role !== 'ADMIN') {
       throw new ApiError(Messages.FORBIDDEN_ACCESS, StatusCode.Forbidden)
     }
   })
