@@ -100,18 +100,6 @@ jobs:
             # 7. Copy application files
             echo "Deploying application files..."
 
-            # Create a minimal schema.prisma file
-            cat > /var/www/sei-institute/backend/prisma/schema.prisma <<'EOF'
-            datasource db {
-              provider = "postgresql"
-              url      = env("DATABASE_URL")
-            }
-
-            generator client {
-              provider = "prisma-client-js"
-            }
-            EOF
-
             # 8. Deploy application
             cd /var/www/sei-institute/backend
 
