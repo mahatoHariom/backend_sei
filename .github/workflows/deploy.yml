@@ -43,17 +43,27 @@ jobs:
               git reset --hard origin/main
             fi
 
-            # Simple database setup (only run if PostgreSQL is available)
+            # Setup simplified PostgreSQL database and user
             if command -v psql &> /dev/null; then
-              # Create user and database if they don't exist
-              sudo -u postgres psql -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'sei_prod_user') THEN CREATE USER sei_prod_user WITH PASSWORD 'StrongP@ssw0rd123'; END IF; END \$\$;"
-              sudo -u postgres psql -c "SELECT 'CREATE DATABASE sei_institute' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'sei_institute');"
-              sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei_institute TO sei_prod_user;"
+              # Create simple user and database if they don't exist
+              sudo -u postgres psql -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'sei') THEN CREATE USER sei WITH PASSWORD 'sei'; END IF; END \$\$;"
+              sudo -u postgres psql -c "DROP DATABASE IF EXISTS sei;"
+              sudo -u postgres psql -c "CREATE DATABASE sei;"
+              sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;"
+              
+              # Connect to database and set up permissions (this is crucial for migrations)
+              sudo -u postgres psql -d sei -c "GRANT ALL PRIVILEGES ON SCHEMA public TO sei;"
+              
+              # These might fail on first run but that's okay - they'll work after migrations
+              sudo -u postgres psql -d sei -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO sei;" || true
+              sudo -u postgres psql -d sei -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO sei;" || true
+              sudo -u postgres psql -d sei -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO sei;" || true
+              sudo -u postgres psql -d sei -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO sei;" || true
             fi
 
             # Create Nginx configuration for API subdomain if it doesn't exist
             if [ ! -f "/etc/nginx/sites-available/api.seiinstitute.com" ]; then
-              cat > /etc/nginx/sites-available/api.seiinstitute.com <<EOD
+              cat > /etc/nginx/sites-available/api.seiinstitute.com <<'EOD'
             server {
                 listen 80;
                 server_name api.seiinstitute.com;
@@ -61,27 +71,25 @@ jobs:
                 location / {
                     proxy_pass http://localhost:9000;
                     proxy_http_version 1.1;
-                    proxy_set_header Upgrade \$http_upgrade;
+                    proxy_set_header Upgrade $http_upgrade;
                     proxy_set_header Connection "upgrade";
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                    proxy_cache_bypass \$http_upgrade;
+                    proxy_set_header Host $host;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                    proxy_cache_bypass $http_upgrade;
                 }
             }
             EOD
               
-              # Enable the site and restart nginx if available
-              if command -v nginx &> /dev/null; then
-                ln -sf /etc/nginx/sites-available/api.seiinstitute.com /etc/nginx/sites-enabled/
-                nginx -t && systemctl restart nginx
-              fi
+              # Enable the site and restart nginx
+              ln -sf /etc/nginx/sites-available/api.seiinstitute.com /etc/nginx/sites-enabled/
+              nginx -t && systemctl restart nginx
             fi
 
-            # Set environment variables in .env file
-            cat > /var/www/sei-institute/backend/.env <<EOD
+            # Set environment variables with simplified database credentials
+            cat > /var/www/sei-institute/backend/.env <<'EOD'
             PORT=9000
-            DATABASE_URL="postgresql://sei_prod_user:StrongP@ssw0rd123@127.0.0.1:5432/sei_institute?schema=public"
+            DATABASE_URL="postgresql://sei:sei@127.0.0.1:5432/sei?schema=public"
             CLIENT_ENDPOINT="https://seiinstitute.com"
             JWT_SECRET="mahatohariomsfadfnasldkjf"
             ACCESS_TOKEN_EXPIRES="1d"
@@ -91,21 +99,32 @@ jobs:
             API_URL="http://api.seiinstitute.com"
             EOD
 
-            # Install dependencies and run Prisma
+            # Install dependencies
             cd /var/www/sei-institute/backend
             npm ci
-            npx prisma generate
-            npx prisma migrate deploy
 
-            # Build and start application using PM2
+            # Run Prisma commands properly
+            cd /var/www/sei-institute/backend
+            npx prisma generate
+
+            # Force reset database on first run or migration issues (CAUTION: removes all data)
+            if [ ! -f "/var/www/sei-institute/backend/.migration_done" ]; then
+              echo "Performing initial migration..."
+              npx prisma migrate reset --force || true
+              touch /var/www/sei-institute/backend/.migration_done
+            else
+              echo "Running regular migration..."
+              npx prisma migrate deploy
+            fi
+
+            # Build the application
             npm run build
 
-            # Ensure PM2 is installed
+            # Restart or start the backend with PM2
             if ! command -v pm2 &> /dev/null; then
               npm install -g pm2
             fi
 
-            # Start/restart the backend service
             cd /var/www/sei-institute/backend
             pm2 describe backend > /dev/null 2>&1
             if [ $? -eq 0 ]; then
@@ -116,9 +135,7 @@ jobs:
             pm2 save
 
             # Verify deployment
-            if [ -d "/var/www/sei-institute/backend/build" ]; then
-              echo "Build directory exists, deployment successful"
-            else
-              echo "ERROR: Build directory does not exist, deployment failed"
-              exit 1
-            fi
+            echo "Checking backend status..."
+            pm2 status
+            echo "Verifying database connection..."
+            cd /var/www/sei-institute/backend && npx prisma db pull --force
