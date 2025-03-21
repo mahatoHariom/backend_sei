@@ -21,7 +21,11 @@ jobs:
           cache-dependency-path: 'package-lock.json'
 
       - name: Install Dependencies
-        run: npm ci
+        run: |
+          # Ensure package-lock.json is in sync with package.json
+          npm install
+          # Perform clean install
+          npm ci
 
       - name: Build
         run: npm run build
@@ -63,7 +67,7 @@ jobs:
               sed -i "s|^#data_directory.*|data_directory = '/var/lib/postgresql/16/main'|" /etc/postgresql/16/main/postgresql.conf
               sed -i "s|^#listen_addresses.*|listen_addresses = 'localhost'|" /etc/postgresql/16/main/postgresql.conf
               systemctl daemon-reload
-              systemctl start postgresql@16-main || { echo "❌ Failed to start PostgreSQL"; exit 1; }
+              systemctl start postgresql@16-main || { echo "❌ Failed to start PostgreSQL"; journalctl -u postgresql@16-main -n 20; exit 1; }
               systemctl enable postgresql@16-main
               echo "✅ PostgreSQL cluster initialized."
             else
@@ -132,7 +136,7 @@ jobs:
             EOF
             rm -f /etc/nginx/sites-enabled/default
             ln -sf /etc/nginx/sites-available/api.seiinstitute.com /etc/nginx/sites-enabled/
-            nginx -t && systemctl restart nginx || { echo "❌ Nginx configuration failed"; exit 1; }
+            nginx -t && systemctl restart nginx || { echo "❌ Nginx configuration failed"; nginx -t; exit 1; }
             echo "✅ Nginx configured."
 
             # 7. Setup environment
@@ -195,9 +199,9 @@ jobs:
               exit 1
             fi
 
-            # Install minimal dependencies for Prisma
-            echo "Installing Prisma dependencies..."
-            npm install prisma @prisma/client dotenv --no-save
+            # Install dependencies
+            echo "Installing dependencies..."
+            npm install || { echo "❌ npm install failed"; npm install --verbose; exit 1; }
 
             # Generate Prisma client
             echo "Generating Prisma client..."
@@ -207,11 +211,11 @@ jobs:
             echo "Handling database migrations..."
             if [ -d "prisma/migrations" ] && [ -n "$(ls -A prisma/migrations)" ]; then
               echo "Applying existing migrations..."
-              npx prisma migrate deploy || { echo "❌ Migrate deploy failed"; exit 1; }
+              npx prisma migrate deploy || { echo "❌ Migrate deploy failed"; npx prisma migrate status; exit 1; }
             else
               echo "No migrations found. Creating initial migration..."
               npx prisma migrate dev --name init --create-only || { echo "❌ Migrate dev failed"; cat prisma/schema.prisma; exit 1; }
-              npx prisma migrate deploy || { echo "❌ Migrate deploy failed after init"; exit 1; }
+              npx prisma migrate deploy || { echo "❌ Migrate deploy failed after init"; npx prisma migrate status; exit 1; }
             fi
 
             # Verify database schema
