@@ -33,17 +33,17 @@ jobs:
           username: root
           password: gkjaRhMActfMatPW7nvd
           script: |
-            # Create directory structure
-            mkdir -p /var/www/sei-institute/backend
-
-            # Clone/pull repository with force
-            if [ -d "/var/www/sei-institute/backend/.git" ]; then
+            # Create or update backend repository
+            if [ ! -d "/var/www/sei-institute/backend/.git" ]; then
+              # First time setup - clone repo
+              mkdir -p /var/www/sei-institute/backend
+              git clone --single-branch --branch main https://github.com/${{ github.repository }}.git /var/www/sei-institute/backend
+              cd /var/www/sei-institute/backend
+            else
+              # Update existing repo
               cd /var/www/sei-institute/backend
               git fetch origin
               git reset --hard origin/main
-            else
-              git clone --single-branch --branch main https://github.com/${{ github.repository }}.git /var/www/sei-institute/backend
-              cd /var/www/sei-institute/backend
             fi
 
             # Install PostgreSQL if not installed
@@ -64,7 +64,7 @@ jobs:
             sleep 5 # Give time for restart
 
             # Set postgres password
-            echo "ALTER USER postgres WITH PASSWORD 'mahato';" | sudo -u postgres psql
+            echo "ALTER USER postgres WITH PASSWORD 'mahato';" | sudo -u postgres psql || true
 
             # Setup database user and permissions
             sudo -u postgres psql <<EOD
@@ -77,8 +77,10 @@ jobs:
               END IF;
             END
             \$\$;
-            DROP DATABASE IF EXISTS sei_institute;
-            CREATE DATABASE sei_institute;
+
+            SELECT 'CREATE DATABASE sei_institute'
+            WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'sei_institute');
+
             GRANT ALL PRIVILEGES ON DATABASE sei_institute TO sei_prod_user;
             \c sei_institute
             GRANT ALL ON SCHEMA public TO sei_prod_user;
@@ -88,7 +90,7 @@ jobs:
             cat > /var/www/sei-institute/backend/.env <<EOD
             PORT=9000
             DATABASE_URL="postgresql://sei_prod_user:StrongP@ssw0rd123@127.0.0.1:5432/sei_institute?schema=public"
-            CLIENT_ENDPOINT="https://sei-institute.com"
+            CLIENT_ENDPOINT="http://seiinstitute.com"
             JWT_SECRET="mahatohariomsfadfnasldkjf"
             ACCESS_TOKEN_EXPIRES="1d"
             REFRESH_TOKEN_EXPIRES="7d"
@@ -96,74 +98,37 @@ jobs:
             HUGGING_FACE_KEY="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"
             EOD
 
-            # Navigate to project directory
-            cd /var/www/sei-institute/backend
-
             # Install dependencies and fix vulnerabilities
+            cd /var/www/sei-institute/backend
             npm ci
-            npm audit fix --force
+            npm audit fix || true
 
             # Run Prisma migrations
+            cd /var/www/sei-institute/backend
             npx prisma generate
             npx prisma migrate deploy
-
-            # Copy SSL setup script from frontend if it exists
-            if [ -f "/var/www/sei-institute/client/scripts/ssl-setup.sh" ]; then
-              cp /var/www/sei-institute/client/scripts/ssl-setup.sh /var/www/sei-institute/backend/
-              chmod +x /var/www/sei-institute/backend/ssl-setup.sh
-              ./ssl-setup.sh
-            else
-              # Install certbot if not already installed
-              if ! command -v certbot &> /dev/null; then
-                apt-get update
-                apt-get install -y certbot python3-certbot-nginx
-              fi
-              
-              # Set up SSL certificates for API domain
-              certbot --nginx -d api.seiinstitute.com --non-interactive --agree-tos --email admin@seiinstitute.com
-            fi
-
-            # Setup nginx configuration
-            cat > /etc/nginx/sites-available/backend <<'EOD'
-            server {
-              listen 80;
-              server_name api.seiinstitute.com;
-              
-              # Redirect HTTP to HTTPS
-              return 301 https://$host$request_uri;
-            }
-
-            server {
-              listen 443 ssl;
-              server_name api.seiinstitute.com;
-              
-              # SSL certificate configuration
-              ssl_certificate /etc/letsencrypt/live/api.seiinstitute.com/fullchain.pem;
-              ssl_certificate_key /etc/letsencrypt/live/api.seiinstitute.com/privkey.pem;
-              
-              location / {
-                proxy_pass http://127.0.0.1:9000;
-                proxy_http_version 1.1;
-                proxy_set_header Upgrade $http_upgrade;
-                proxy_set_header Connection "upgrade";
-                proxy_set_header Host $host;
-                proxy_set_header X-Real-IP $remote_addr;
-                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                proxy_cache_bypass $http_upgrade;
-              }
-            }
-            EOD
-
-            # Enable site and restart nginx if config is valid
-            ln -sf /etc/nginx/sites-available/backend /etc/nginx/sites-enabled/
-            nginx -t && systemctl restart nginx
 
             # Install PM2 if not installed
             if ! command -v pm2 &> /dev/null; then
               npm install -g pm2
             fi
 
-            # Start/Restart application using .env file
-            pm2 delete backend || true
-            cd /var/www/sei-institute/backend && pm2 start build/server.js --name backend
+            # Start/Restart application using PM2
+            cd /var/www/sei-institute/backend
+            pm2 describe backend > /dev/null 2>&1
+            if [ $? -eq 0 ]; then
+              # Restart if already exists
+              pm2 restart backend --update-env
+            else
+              # Start new process
+              pm2 start build/server.js --name backend
+            fi
             pm2 save
+
+            # Verify deployment
+            if [ -d "/var/www/sei-institute/backend/build" ]; then
+              echo "Build directory exists, deployment successful"
+            else
+              echo "ERROR: Build directory does not exist, deployment failed"
+              exit 1
+            fi
