@@ -14,7 +14,13 @@ export async function registerPlugins(app: FastifyInstance) {
   // Security plugins
   await app.register(cors, {
     credentials: true,
-    origin: ['https://seiinstitute.com']
+    origin: [
+      'https://seiinstitute.com',
+      'http://seiinstitute.com',
+      'https://www.seiinstitute.com',
+      'http://www.seiinstitute.com',
+      'http://localhost:3000'
+    ]
   })
 
   await app.register(helmet, {
@@ -51,7 +57,7 @@ export async function registerPlugins(app: FastifyInstance) {
       },
       servers: [
         {
-          url: 'https://api.seiinstitute.com'
+          url: 'http://api.seiinstitute.com'
         }
       ],
       components: {
