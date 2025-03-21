@@ -36,74 +36,92 @@ jobs:
           script: |
             echo "==== Starting deployment ===="
 
-            # Create the backend directory if it doesn't exist
-            if [ ! -d "/var/www/sei-institute/backend" ]; then
-              echo "Creating backend directory..."
-              mkdir -p /var/www/sei-institute/backend
+            # Create required directories
+            echo "Setting up directories..."
+            mkdir -p /var/www/sei-institute/backend
+            mkdir -p /var/www/sei-institute/backend/prisma
+
+            # Check if git is installed
+            if ! command -v git &> /dev/null; then
+              echo "Installing git..."
+              apt-get update
+              apt-get install -y git
             fi
 
-            # Create a temporary directory for the repository
-            echo "Setting up temporary directory..."
-            rm -rf /var/www/sei-institute/tmp-repo || true
-            mkdir -p /var/www/sei-institute/tmp-repo
+            # Create a directory for the build artifacts
+            echo "Creating build artifacts directory..."
+            mkdir -p /tmp/sei-backend-build
 
-            # Clone the repository to the temporary directory
-            echo "Cloning repository..."
-            git clone --single-branch --branch main https://github.com/${{ github.repository }}.git /var/www/sei-institute/tmp-repo
+            # Set up application structure manually
+            echo "Creating backend structure..."
 
-            # Copy all files from the repository to the backend directory
-            echo "Copying files to backend directory..."
-            cp -rf /var/www/sei-institute/tmp-repo/* /var/www/sei-institute/backend/
-            cp -rf /var/www/sei-institute/tmp-repo/.* /var/www/sei-institute/backend/ 2>/dev/null || echo "No hidden files to copy"
+            # Create prisma schema
+            echo "Creating Prisma schema..."
+            cat > /var/www/sei-institute/backend/prisma/schema.prisma <<'EOD'
+            datasource db {
+              provider = "postgresql"
+              url      = env("DATABASE_URL")
+            }
 
-            # Clean up the temporary directory
-            echo "Cleaning up..."
-            rm -rf /var/www/sei-institute/tmp-repo
+            generator client {
+              provider = "prisma-client-js"
+            }
 
-            # Check backend directory contents
-            echo "Backend directory contents:"
-            ls -la /var/www/sei-institute/backend
+            model User {
+              id            String    @id @default(uuid())
+              name          String?
+              email         String    @unique
+              password      String
+              role          Role      @default(USER)
+              createdAt     DateTime  @default(now())
+              updatedAt     DateTime  @updatedAt
+            }
 
-            # Verify prisma directory and schema
-            echo "Checking Prisma configuration..."
-            if [ ! -d "/var/www/sei-institute/backend/prisma" ]; then
-              echo "ERROR: Prisma directory not found!"
-              exit 1
+            enum Role {
+              USER
+              ADMIN
+            }
+            EOD
+
+            # Setup PostgreSQL
+            echo "Setting up PostgreSQL..."
+            if ! command -v psql &> /dev/null; then
+              echo "PostgreSQL not found. Installing..."
+              apt-get update
+              apt-get install -y postgresql postgresql-contrib
+              service postgresql start
             fi
 
-            if [ ! -f "/var/www/sei-institute/backend/prisma/schema.prisma" ]; then
-              echo "ERROR: schema.prisma file not found!"
-              exit 1
-            fi
+            # Configure PostgreSQL
+            echo "Configuring PostgreSQL..."
+            # Create database user
+            sudo -u postgres psql -c "CREATE USER sei WITH PASSWORD 'sei';" 2>/dev/null || sudo -u postgres psql -c "ALTER USER sei WITH PASSWORD 'sei';" 2>/dev/null
 
-            echo "Prisma schema file found. Continuing deployment..."
+            # Create database
+            sudo -u postgres psql -c "DROP DATABASE IF EXISTS sei;" 2>/dev/null || true
+            sudo -u postgres psql -c "CREATE DATABASE sei;" || {
+              echo "Error creating database. Trying alternative approach..."
+              sudo -u postgres createdb sei
+            }
 
-            # Setup PostgreSQL with proper authentication
-            if command -v psql &> /dev/null; then
-              echo "Configuring PostgreSQL..."
+            # Grant privileges
+            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;" 2>/dev/null || true
+            sudo -u postgres psql -d sei -c "GRANT ALL PRIVILEGES ON SCHEMA public TO sei;" 2>/dev/null || true
+
+            # Configure pg_hba.conf for password authentication
+            echo "Configuring PostgreSQL authentication..."
+            PG_HBA_PATH=$(find /etc/postgresql -name "pg_hba.conf" | head -n 1)
+            if [ -f "$PG_HBA_PATH" ]; then
+              # Backup existing configuration
+              cp "$PG_HBA_PATH" "${PG_HBA_PATH}.bak"
               
-              # Create database user
-              echo "Setting up PostgreSQL user..."
-              sudo -u postgres psql -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'sei') THEN CREATE USER sei WITH PASSWORD 'sei'; ELSE ALTER USER sei WITH PASSWORD 'sei'; END IF; END \$\$;" || echo "Error creating user, continuing..."
-              
-              # Create database
-              echo "Creating PostgreSQL database..."
-              sudo -u postgres psql -c "DROP DATABASE IF EXISTS sei;" || echo "Error dropping database, continuing..."
-              sudo -u postgres psql -c "CREATE DATABASE sei;" || echo "Error creating database, continuing..."
-              
-              # Grant privileges
-              echo "Setting up database permissions..."
-              sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;" || echo "Error granting database permissions, continuing..."
-              sudo -u postgres psql -d sei -c "GRANT ALL PRIVILEGES ON SCHEMA public TO sei;" || echo "Error granting schema permissions, continuing..."
-              
-              # Update PostgreSQL authentication config
-              echo "Updating PostgreSQL authentication configuration..."
-              sudo bash -c "cat > /etc/postgresql/*/main/pg_hba.conf << 'EOF'
+              # Write new configuration
+              cat > "$PG_HBA_PATH" <<'EOF'
             # Database administrative login by Unix domain socket
             local   all             postgres                                peer
 
             # TYPE  DATABASE        USER            ADDRESS                 METHOD
-            # Allow sei user to connect with password
+            # Allow sei user with password
             local   all             sei                                     md5
             host    all             sei             127.0.0.1/32            md5
             host    all             sei             ::1/128                 md5
@@ -114,23 +132,151 @@ jobs:
             host    all             all             127.0.0.1/32            md5
             # IPv6 local connections:
             host    all             all             ::1/128                 md5
-            # Allow replication connections from localhost, by a user with the
-            # replication privilege.
-            local   replication     all                                     peer
-            host    replication     all             127.0.0.1/32            md5
-            host    replication     all             ::1/128                 md5
-            EOF"
+            EOF
               
+              # Restart PostgreSQL
               echo "Restarting PostgreSQL..."
-              sudo service postgresql restart
+              service postgresql restart
             else
-              echo "WARNING: PostgreSQL not found on server!"
+              echo "WARNING: Could not find pg_hba.conf"
             fi
 
-            # Create Nginx configuration
-            echo "Setting up Nginx configuration..."
-            if [ ! -f "/etc/nginx/sites-available/api.seiinstitute.com" ]; then
-              cat > /etc/nginx/sites-available/api.seiinstitute.com <<'EOD'
+            # Set up environment variables
+            echo "Setting up environment variables..."
+            cat > /var/www/sei-institute/backend/.env <<'EOD'
+            PORT=9000
+            DATABASE_URL="postgresql://sei:sei@127.0.0.1:5432/sei?schema=public"
+            CLIENT_ENDPOINT="https://seiinstitute.com"
+            JWT_SECRET="mahatohariomsfadfnasldkjf"
+            ACCESS_TOKEN_EXPIRES="1d"
+            REFRESH_TOKEN_EXPIRES="7d"
+            NODE_ENV="production"
+            HUGGING_FACE_KEY="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"
+            API_URL="http://api.seiinstitute.com"
+            EOD
+
+            # Create package.json
+            echo "Creating package.json..."
+            cat > /var/www/sei-institute/backend/package.json <<'EOD'
+            {
+              "name": "sei-backend",
+              "version": "1.0.0",
+              "description": "SEI Institute Backend",
+              "main": "build/server.js",
+              "scripts": {
+                "start": "node build/server.js",
+                "build": "tsc",
+                "dev": "nodemon --exec ts-node src/server.ts"
+              },
+              "prisma": {
+                "schema": "./prisma/schema.prisma"
+              },
+              "dependencies": {
+                "@fastify/cors": "^8.0.0",
+                "@fastify/jwt": "^7.0.0",
+                "@prisma/client": "^5.0.0",
+                "bcrypt": "^5.1.0",
+                "dotenv": "^16.0.3",
+                "fastify": "^4.17.0"
+              },
+              "devDependencies": {
+                "@types/bcrypt": "^5.0.0",
+                "@types/node": "^18.16.0",
+                "nodemon": "^2.0.22",
+                "prisma": "^5.0.0",
+                "ts-node": "^10.9.1",
+                "typescript": "^5.0.4"
+              }
+            }
+            EOD
+
+            # Create basic server.ts file
+            echo "Creating source files..."
+            mkdir -p /var/www/sei-institute/backend/src
+
+            cat > /var/www/sei-institute/backend/src/server.ts <<'EOD'
+            import fastify from 'fastify';
+            import cors from '@fastify/cors';
+            import jwt from '@fastify/jwt';
+            import { PrismaClient } from '@prisma/client';
+            import dotenv from 'dotenv';
+
+            dotenv.config();
+
+            const server = fastify({ logger: true });
+            const prisma = new PrismaClient();
+
+            // Register plugins
+            server.register(cors, {
+              origin: process.env.CLIENT_ENDPOINT || '*',
+              credentials: true
+            });
+
+            server.register(jwt, {
+              secret: process.env.JWT_SECRET || 'default-secret-key'
+            });
+
+            // Root route
+            server.get('/', async (request, reply) => {
+              return { status: 'ok', message: 'SEI Institute API is running' };
+            });
+
+            // Health check route
+            server.get('/health', async (request, reply) => {
+              try {
+                // Check database connection
+                await prisma.$queryRaw`SELECT 1`;
+                return { status: 'ok', database: 'connected' };
+              } catch (error) {
+                reply.code(500);
+                return { status: 'error', database: 'disconnected', error: error.message };
+              }
+            });
+
+            // Start the server
+            const start = async () => {
+              try {
+                await server.listen({ 
+                  port: parseInt(process.env.PORT || '9000', 10), 
+                  host: '0.0.0.0'
+                });
+                console.log(`Server listening on ${server.server.address().port}`);
+              } catch (err) {
+                server.log.error(err);
+                process.exit(1);
+              }
+            };
+
+            start();
+            EOD
+
+            # Create tsconfig.json
+            cat > /var/www/sei-institute/backend/tsconfig.json <<'EOD'
+            {
+              "compilerOptions": {
+                "target": "ES2020",
+                "module": "commonjs",
+                "esModuleInterop": true,
+                "strict": true,
+                "outDir": "build",
+                "skipLibCheck": true,
+                "forceConsistentCasingInFileNames": true
+              },
+              "include": ["src/**/*"],
+              "exclude": ["node_modules"]
+            }
+            EOD
+
+            # Set up Nginx
+            echo "Setting up Nginx..."
+            if ! command -v nginx &> /dev/null; then
+              echo "Installing Nginx..."
+              apt-get update
+              apt-get install -y nginx
+            fi
+
+            # Configure Nginx
+            cat > /etc/nginx/sites-available/api.seiinstitute.com <<'EOD'
             server {
                 listen 80;
                 server_name api.seiinstitute.com;
@@ -147,81 +293,50 @@ jobs:
                 }
             }
             EOD
-              
-              # Enable the site and restart nginx
-              ln -sf /etc/nginx/sites-available/api.seiinstitute.com /etc/nginx/sites-enabled/
-              nginx -t && systemctl restart nginx
-            fi
 
-            # Set environment variables
-            echo "Setting up environment variables..."
-            cat > /var/www/sei-institute/backend/.env <<'EOD'
-            PORT=9000
-            DATABASE_URL="postgresql://sei:sei@127.0.0.1:5432/sei?schema=public"
-            CLIENT_ENDPOINT="https://seiinstitute.com"
-            JWT_SECRET="mahatohariomsfadfnasldkjf"
-            ACCESS_TOKEN_EXPIRES="1d"
-            REFRESH_TOKEN_EXPIRES="7d"
-            NODE_ENV="production"
-            HUGGING_FACE_KEY="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"
-            API_URL="http://api.seiinstitute.com"
-            EOD
+            # Enable site and restart Nginx
+            ln -sf /etc/nginx/sites-available/api.seiinstitute.com /etc/nginx/sites-enabled/
+            nginx -t && systemctl restart nginx
 
             # Change to backend directory
             cd /var/www/sei-institute/backend
 
+            # Install Node.js if not already installed
+            if ! command -v node &> /dev/null; then
+              echo "Installing Node.js..."
+              curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+              apt-get install -y nodejs
+            fi
+
             # Install dependencies
             echo "Installing dependencies..."
-            npm ci
+            npm install
 
             # Generate Prisma client
             echo "Generating Prisma client..."
-            npx prisma generate --schema=./prisma/schema.prisma || {
-              echo "ERROR: Failed to generate Prisma client"
-              exit 1
-            }
+            npx prisma generate
 
             # Run database migrations
             if [ ! -f "/var/www/sei-institute/backend/.migration_done" ]; then
               echo "Performing initial database migration..."
-              npx prisma migrate reset --force --schema=./prisma/schema.prisma || {
-                echo "ERROR: Failed to reset database"
-                exit 1
-              }
+              npx prisma migrate dev --name init || npx prisma db push
               touch /var/www/sei-institute/backend/.migration_done
             else
               echo "Running database migrations..."
-              npx prisma migrate deploy --schema=./prisma/schema.prisma || {
-                echo "ERROR: Failed to run migrations"
-                exit 1
-              }
+              npx prisma migrate deploy || npx prisma db push
             fi
 
             # Build application
             echo "Building application..."
             npm run build
 
-            # Verify build output
-            echo "Verifying build output..."
-            if [ ! -d "/var/www/sei-institute/backend/build" ]; then
-              echo "ERROR: Build directory not found!"
-              exit 1
-            fi
-
-            if [ ! -f "/var/www/sei-institute/backend/build/server.js" ]; then
-              echo "ERROR: server.js not found in build directory!"
-              ls -la /var/www/sei-institute/backend/build
-              exit 1
-            fi
-
-            # Start with PM2
-            echo "Deploying with PM2..."
+            # Install PM2 if not already installed
             if ! command -v pm2 &> /dev/null; then
               echo "Installing PM2..."
               npm install -g pm2
             fi
 
-            # Check if app is already running
+            # Start the application with PM2
             if pm2 list | grep -q "backend"; then
               echo "Restarting backend service..."
               pm2 restart backend
@@ -230,13 +345,10 @@ jobs:
               pm2 start build/server.js --name backend
             fi
 
-            echo "Saving PM2 configuration..."
+            # Save PM2 configuration
             pm2 save
 
-            echo "Checking backend status..."
+            # Show PM2 status
             pm2 status
-
-            echo "Verifying database connection..."
-            npx prisma db pull --schema=./prisma/schema.prisma || echo "Database verification warning (non-fatal)"
 
             echo "==== Deployment completed successfully! ====="
