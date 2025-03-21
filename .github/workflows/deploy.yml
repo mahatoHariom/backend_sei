@@ -17,7 +17,6 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: 'package-lock.json'
 
       - name: Install Dependencies
         run: npm ci
@@ -33,37 +32,54 @@ jobs:
           username: root
           password: gkjaRhMActfMatPW7nvd
           script: |
-            # Create or update backend repository
-            if [ ! -d "/var/www/sei-institute/backend" ]; then
-              mkdir -p /var/www/sei-institute/backend
-              git clone --single-branch --branch main https://github.com/${{ github.repository }}.git /var/www/sei-institute/backend
+            set -e
+            DEPLOY_DIR="/var/www/sei-institute/backend"
+
+            # Clone or update repository
+            if [ ! -d "$DEPLOY_DIR" ]; then
+              mkdir -p $DEPLOY_DIR
+              git clone --single-branch --branch main https://github.com/${{ github.repository }}.git $DEPLOY_DIR
             else
-              cd /var/www/sei-institute/backend
+              cd $DEPLOY_DIR
               git fetch origin
               git reset --hard origin/main
             fi
 
-            # Setup simplified PostgreSQL database and user
-            if command -v psql &> /dev/null; then
-              # Create simple user and database if they don't exist
-              sudo -u postgres psql -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'sei') THEN CREATE USER sei WITH PASSWORD 'sei'; END IF; END \$\$;"
-              sudo -u postgres psql -c "DROP DATABASE IF EXISTS sei;"
-              sudo -u postgres psql -c "CREATE DATABASE sei;"
-              sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;"
-              
-              # Connect to database and set up permissions (this is crucial for migrations)
-              sudo -u postgres psql -d sei -c "GRANT ALL PRIVILEGES ON SCHEMA public TO sei;"
-              
-              # These might fail on first run but that's okay - they'll work after migrations
-              sudo -u postgres psql -d sei -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO sei;" || true
-              sudo -u postgres psql -d sei -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO sei;" || true
-              sudo -u postgres psql -d sei -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO sei;" || true
-              sudo -u postgres psql -d sei -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO sei;" || true
+            # Install PostgreSQL if not present
+            if ! command -v psql &> /dev/null; then
+              apt-get update
+              apt-get install -y postgresql postgresql-contrib
+              systemctl start postgresql
+              systemctl enable postgresql
             fi
 
-            # Create Nginx configuration for API subdomain if it doesn't exist
-            if [ ! -f "/etc/nginx/sites-available/api.seiinstitute.com" ]; then
-              cat > /etc/nginx/sites-available/api.seiinstitute.com <<'EOD'
+            # Setup PostgreSQL database and user
+            sudo -u postgres psql -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'sei') THEN CREATE USER sei WITH PASSWORD 'sei'; END IF; END \$\$;"
+            sudo -u postgres psql -c "DROP DATABASE IF EXISTS sei;" || true
+            sudo -u postgres psql -c "CREATE DATABASE sei OWNER sei;"
+            sudo -u postgres psql -d sei -c "GRANT ALL PRIVILEGES ON SCHEMA public TO sei;"
+
+            # Set environment variables
+            cat > $DEPLOY_DIR/.env << 'EOD'
+            PORT=9000
+            DATABASE_URL="postgresql://sei:sei@127.0.0.1:5432/sei?schema=public"
+            CLIENT_ENDPOINT="https://seiinstitute.com"
+            JWT_SECRET="mahatohariomsfadfnasldkjf"
+            ACCESS_TOKEN_EXPIRES="1d"
+            REFRESH_TOKEN_EXPIRES="7d"
+            NODE_ENV="production"
+            HUGGING_FACE_KEY="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"
+            API_URL="https://api.seiinstitute.com"
+            EOD
+
+            # Install dependencies and run Prisma migrations
+            cd $DEPLOY_DIR
+            npm ci
+            npx prisma generate
+            npx prisma migrate deploy
+
+            # Configure Nginx for API (HTTP initially)
+            cat > /etc/nginx/sites-available/api.seiinstitute.com << 'EOD'
             server {
                 listen 80;
                 server_name api.seiinstitute.com;
@@ -80,62 +96,30 @@ jobs:
                 }
             }
             EOD
-              
-              # Enable the site and restart nginx
-              ln -sf /etc/nginx/sites-available/api.seiinstitute.com /etc/nginx/sites-enabled/
-              nginx -t && systemctl restart nginx
-            fi
+            ln -sf /etc/nginx/sites-available/api.seiinstitute.com /etc/nginx/sites-enabled/
+            nginx -t && systemctl restart nginx
 
-            # Set environment variables with simplified database credentials
-            cat > /var/www/sei-institute/backend/.env <<'EOD'
-            PORT=9000
-            DATABASE_URL="postgresql://sei:sei@127.0.0.1:5432/sei?schema=public"
-            CLIENT_ENDPOINT="https://seiinstitute.com"
-            JWT_SECRET="mahatohariomsfadfnasldkjf"
-            ACCESS_TOKEN_EXPIRES="1d"
-            REFRESH_TOKEN_EXPIRES="7d"
-            NODE_ENV="production"
-            HUGGING_FACE_KEY="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"
-            API_URL="http://api.seiinstitute.com"
-            EOD
-
-            # Install dependencies
-            cd /var/www/sei-institute/backend
-            npm ci
-
-            # Run Prisma commands properly
-            cd /var/www/sei-institute/backend
-            npx prisma generate
-
-            # Force reset database on first run or migration issues (CAUTION: removes all data)
-            if [ ! -f "/var/www/sei-institute/backend/.migration_done" ]; then
-              echo "Performing initial migration..."
-              npx prisma migrate reset --force || true
-              touch /var/www/sei-institute/backend/.migration_done
-            else
-              echo "Running regular migration..."
-              npx prisma migrate deploy
-            fi
-
-            # Build the application
+            # Build and start backend with PM2
+            cd $DEPLOY_DIR
             npm run build
-
-            # Restart or start the backend with PM2
             if ! command -v pm2 &> /dev/null; then
               npm install -g pm2
             fi
-
-            cd /var/www/sei-institute/backend
-            pm2 describe backend > /dev/null 2>&1
-            if [ $? -eq 0 ]; then
-              pm2 restart backend
-            else
-              pm2 start build/server.js --name backend
-            fi
+            pm2 delete backend || true
+            pm2 start build/server.js --name backend
             pm2 save
+            pm2 startup systemd -u root --hp /root
 
-            # Verify deployment
-            echo "Checking backend status..."
-            pm2 status
-            echo "Verifying database connection..."
-            cd /var/www/sei-institute/backend && npx prisma db pull --force
+            # Install Certbot and configure SSL for API
+            if ! command -v certbot &> /dev/null; then
+              apt-get update
+              apt-get install -y certbot python3-certbot-nginx
+            fi
+
+            # Obtain SSL certificate for API
+            certbot --nginx -d api.seiinstitute.com --non-interactive --agree-tos --email your-email@example.com
+
+            # Reload Nginx with SSL config
+            nginx -t && systemctl restart nginx
+
+            echo "Backend deployment with SSL completed!"
