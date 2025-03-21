@@ -5,12 +5,12 @@ import jwt, { JwtPayload } from 'jsonwebtoken'
 
 export function generateJsonWebToken(data: User) {
   return jwt.sign(data, process.env.JWT_SECRET as string, {
-    expiresIn: process.env.ACCESS_TOKEN_EXPIRES
+    expiresIn: '1d'
   })
 }
 export function generateRefreshToken(data: User) {
   return jwt.sign(data, process.env.JWT_SECRET as string, {
-    expiresIn: process.env.REFRESH_TOKEN_EXPIRES
+    expiresIn: '7d'
   })
 }
 const validateToken = (token: string): (User & JwtPayload) | null => {
