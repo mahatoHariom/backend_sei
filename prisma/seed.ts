@@ -77,7 +77,7 @@ async function main() {
 
           password: hashedPassword,
           isVerified: true,
-          role: 'admin'
+          role: 'ADMIN'
         }
       })
       console.log('✅ Admin user created successfully')

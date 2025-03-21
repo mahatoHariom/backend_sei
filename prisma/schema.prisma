@@ -33,19 +33,19 @@ model Contact {
 }
 
 model User {
-    id             String        @id @default(uuid())
-    email          String        @unique
-    fullName       String        @map("name")
-    hashedPassword String
-    isVerified     Boolean       @default(false)
-    role           UserRole      @default(USER)
-    createdAt      DateTime      @default(now())
-    updatedAt      DateTime      @updatedAt
-    userDetail     UserDetail?   @relation("UserDetailRelation")
-    contacts       Contact[]     @relation("UserContacts")
-    subjects       UserSubject[]
-    PdfFile        PdfFile[]
-    Practice       Practice[]
+    id         String        @id @default(uuid())
+    email      String        @unique
+    fullName   String        @map("name")
+    password   String
+    isVerified Boolean       @default(false)
+    role       UserRole      @default(USER)
+    createdAt  DateTime      @default(now())
+    updatedAt  DateTime      @updatedAt
+    userDetail UserDetail?   @relation("UserDetailRelation")
+    contacts   Contact[]     @relation("UserContacts")
+    subjects   UserSubject[]
+    PdfFile    PdfFile[]
+    Practice   Practice[]
 }
 
 model Subject {
