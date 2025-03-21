@@ -26,6 +26,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Archive Build
+        run: tar -czf backend.tar.gz build package.json package-lock.json prisma
+
       - name: Deploy to Server
         if: github.ref == 'refs/heads/main'
         uses: appleboy/ssh-action@master
@@ -34,102 +37,122 @@ jobs:
           username: root
           password: gkjaRhMActfMatPW7nvd
           script: |
-            echo "==== Starting Minimal VPS Setup                         ===="
+            echo "==== Starting Backend Deployment ===="
 
-            # 1. Create necessary directories
+            # 1. Clean up existing backend
+            pm2 stop backend || true
+            pm2 delete backend || true
+            rm -rf /var/www/sei-institute/backend
+
+            # 2. Create necessary directories
             mkdir -p /var/www/sei-institute/backend/prisma
             mkdir -p /var/www/sei-institute/backend/src
 
-                        # 2. Install requ            ired packages (if needed)
+            # 3. Install required packages
             apt-get update
-            apt-get install -y postgresql nginx
+            apt-get install -y postgresql-16 nginx
 
-            # 3. Se            tup PostgreSQL
-            # Create user and database
-                        sudo -u postgres             psql -c "CREATE USER sei WITH PASSWORD 'sei';" 2>/dev/null || sudo -u postgres psql -c "ALTER USER sei WI            TH PASSWOR            D 's            ei';" 2>/dev/null
-            sudo -u postgres psql -c "DROP DATABASE IF EXISTS sei;" 2>/dev/            null || t            rue
-            sudo -u postgres             psql -c "CREATE DATABASE sei;" 2>/dev/null || sudo -u postgres createdb sei
-            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;" 2>/dev/n            ull || true
+            # 4. Initialize PostgreSQL cluster if not already done
+            if [ ! -d "/var/lib/postgresql/16/main" ]; then
+              mkdir -p /var/lib/postgresql/16/main
+              chown -R postgres:postgres /var/lib/postgresql
+              sudo -u postgres /usr/lib/postgresql/16/bin/initdb -D /var/lib/postgresql/16/main
+              mkdir -p /etc/postgresql/16/main
+              cp /var/lib/postgresql/16/main/*.conf /etc/postgresql/16/main/
+              sed -i "s|^#data_directory.*|data_directory = '/var/lib/postgresql/16/main'|" /etc/postgresql/16/main/postgresql.conf
+              systemctl restart postgresql@16-main || systemctl start postgresql@16-main
+            fi
+
+            # 5. Setup PostgreSQL user and database
+            sudo -u postgres psql -c "CREATE USER sei WITH PASSWORD 'sei';" 2>/dev/null || sudo -u postgres psql -c "ALTER USER sei WITH PASSWORD 'sei';"
+            sudo -u postgres psql -c "DROP DATABASE IF EXISTS sei;" 2>/dev/null || true
+            sudo -u postgres psql -c "CREATE DATABASE sei;" 2>/dev/null || sudo -u postgres createdb sei
+            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;"
 
             # Configure PostgreSQL authentication
-                        PG_HBA_PATH=$(fin            d /etc/post            gresql -name "pg_hba.conf" | head -n 1)
-            if [ -                        f "$PG_HBA_PATH" ]; then
-              echo "            local   all   sei               md5" >> "$PG_HBA_PATH"
+            PG_HBA_PATH=$(find /etc/postgresql -name "pg_hba.conf" | head -n 1)
+            if [ -f "$PG_HBA_PATH" ]; then
+              echo "local   all   sei   md5" >> "$PG_HBA_PATH"
               echo "host    all   sei   127.0.0.1/32   md5" >> "$PG_HBA_PATH"
-              service postgresql restart
-                                                fi
+              systemctl restart postgresql@16-main
+            fi
 
-            # 4. Setup Nginx
-            cat > /etc/nginx/sites-availabl            e/api.seiinstitute.com <<'EOF'
+            # 6. Setup Nginx
+            cat > /etc/nginx/sites-available/api.seiinstitute.com <<'EOF'
             server {
-                            listen 80;
-                se            rver_name api.seiinstitute.com;
+                listen 80;
+                server_name api.seiinstitute.com;
                 
-                                        location / {
+                location / {
                     proxy_pass http://localhost:9000;
                     proxy_http_version 1.1;
-                                proxy_set_header Upgrade $h            ttp_upgrade;
-                    proxy_set_header Connection "upgrade";            
+                    proxy_set_header Upgrade $http_upgrade;
+                    proxy_set_header Connection "upgrade";
                     proxy_set_header Host $host;
-                    proxy_set_header X-Real-IP $r            emote_addr;
-                    proxy_set_header X-Forwar            ded-For $proxy_add_x_forwarded_for;
+                    proxy_set_header X-Real-IP $remote_addr;
+                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
                 }
             }
-                                    EOF
-
+            EOF
             ln -sf /etc/nginx/sites-available/api.seiinstitute.com /etc/nginx/sites-enabled/
-            nginx -t && systemctl r            e            start nginx
+            nginx -t && systemctl restart nginx
 
-            # 5. Setup environment
+            # 7. Setup environment
             cat > /var/www/sei-institute/backend/.env <<'EOF'
             PORT=9000
             DATABASE_URL="postgresql://sei:sei@127.0.0.1:5432/sei?schema=public"
             CLIENT_ENDPOINT="https://seiinstitute.com"
-            JWT_SECRET="mahatohariomsf            adfnasldkjf"
+            JWT_SECRET="mahatohariomsfadfnasldkjf"
             NODE_ENV="production"
             API_URL="http://api.seiinstitute.com"
-                        EOF
+            EOF
 
-            # 6. Setup Node.js (if needed)
+            # 8. Install Node.js and PM2
             if ! command -v node &> /dev/null; then
-              curl -fsSL ht            tps://deb.nodesource.com/setup_20.x | bash -
+              curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
               apt-get install -y nodejs
               npm install -g pm2
-                        fi
+            fi
 
-            # 7. Copy application files
-            echo "Deploying applicatio            n files..."
+            # 9. Deploy application files (will be transferred via SCP)
+            echo "Deploying application files..."
 
-            # Create a minimal schema.prisma file
-            cat > /var/www/sei-institute/backend/prisma/schema.prisma <<'EOF'
-            datasource db {
-              provider = "postgresql"
-              url      = env("DATABASE_URL")
-                        }
+      - name: Transfer Build Files
+        if: github.ref == 'refs/heads/main'
+        uses: appleboy/scp-action@master
+        with:
+          host: 37.27.247.208
+          username: root
+          password: ${{ secrets.SERVER_PASSWORD }}
+          source: 'backend.tar.gz'
+          target: '/var/www/sei-institute/backend'
 
-            generator client {
-              provider = "prisma-c            lient-js"
-                        }
-                                    EOF
-
-            # 8. Deploy application
-            cd /var/www/sei-instit            ute/backend
+      - name: Finalize Deployment
+        if: github.ref == 'refs/heads/main'
+        uses: appleboy/ssh-action@master
+        with:
+          host: 37.27.247.208
+          username: root
+          password: ${{ secrets.SERVER_PASSWORD }}
+          script: |
+            cd /var/www/sei-institute/backend
+            tar -xzf backend.tar.gz
+            rm backend.tar.gz
 
             # Install dependencies
-            npm install prisma @prisma/client fas            tify dotenv
+            npm install prisma @prisma/client fastify dotenv
 
-                        # Generate Prisma client
-            npx pris            ma generate
+            # Generate Prisma client and run migrations
+            npx prisma generate
+            npx prisma migrate deploy
 
             # Start with PM2
-                        pm2 describe backend             > /dev/null 2>&1
+            pm2 describe backend > /dev/null 2>&1
             if [ $? -eq 0 ]; then
               pm2 restart backend
             else
               pm2 start npm --name backend -- start
-                        fi
+            fi
+            pm2 save
 
-                        pm2 save            
-
-            echo "==== Minimal VPS Setup Complete ===="
-
+            echo "==== Backend Deployment Complete ===="
