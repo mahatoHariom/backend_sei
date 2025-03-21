@@ -27,7 +27,7 @@ jobs:
         run: npm run build
 
       - name: Archive Build
-        run: tar -czf backend.tar.gz build package.json package-lock.json prisma
+        run: tar -czf backend.tar.gz build package.json package-lock.json prisma src node_modules
 
       - name: Deploy to Server
         if: github.ref == 'refs/heads/main'
@@ -45,8 +45,7 @@ jobs:
             rm -rf /var/www/sei-institute/backend
 
             # 2. Create necessary directories
-            mkdir -p /var/www/sei-institute/backend/prisma
-            mkdir -p /var/www/sei-institute/backend/src
+            mkdir -p /var/www/sei-institute/backend
 
             # 3. Install required packages
             apt-get update
@@ -54,6 +53,7 @@ jobs:
 
             # 4. Initialize PostgreSQL cluster if not already done
             if [ ! -d "/var/lib/postgresql/16/main" ]; then
+              echo "Initializing PostgreSQL cluster..."
               mkdir -p /var/lib/postgresql/16/main
               chown -R postgres:postgres /var/lib/postgresql
               sudo -u postgres /usr/lib/postgresql/16/bin/initdb -D /var/lib/postgresql/16/main
@@ -61,20 +61,41 @@ jobs:
               cp /var/lib/postgresql/16/main/*.conf /etc/postgresql/16/main/
               sed -i "s|^#data_directory.*|data_directory = '/var/lib/postgresql/16/main'|" /etc/postgresql/16/main/postgresql.conf
               systemctl restart postgresql@16-main || systemctl start postgresql@16-main
+              echo "PostgreSQL cluster initialized."
+            else
+              echo "PostgreSQL cluster already exists."
+              systemctl restart postgresql@16-main || systemctl start postgresql@16-main
             fi
 
             # 5. Setup PostgreSQL user and database
+            echo "Setting up PostgreSQL user and database..."
             sudo -u postgres psql -c "CREATE USER sei WITH PASSWORD 'sei';" 2>/dev/null || sudo -u postgres psql -c "ALTER USER sei WITH PASSWORD 'sei';"
             sudo -u postgres psql -c "DROP DATABASE IF EXISTS sei;" 2>/dev/null || true
             sudo -u postgres psql -c "CREATE DATABASE sei;" 2>/dev/null || sudo -u postgres createdb sei
             sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;"
 
+            # Verify database creation
+            if sudo -u postgres psql -l | grep sei; then
+              echo "✅ Database 'sei' created successfully."
+            else
+              echo "❌ Failed to create database 'sei'."
+              exit 1
+            fi
+
             # Configure PostgreSQL authentication
             PG_HBA_PATH=$(find /etc/postgresql -name "pg_hba.conf" | head -n 1)
             if [ -f "$PG_HBA_PATH" ]; then
-              echo "local   all   sei   md5" >> "$PG_HBA_PATH"
-              echo "host    all   sei   127.0.0.1/32   md5" >> "$PG_HBA_PATH"
+              # Check if entries already exist before adding
+              if ! grep -q "local.*sei.*md5" "$PG_HBA_PATH"; then
+                echo "local   all   sei   md5" >> "$PG_HBA_PATH"
+              fi
+              if ! grep -q "host.*sei.*127.0.0.1/32.*md5" "$PG_HBA_PATH"; then
+                echo "host    all   sei   127.0.0.1/32   md5" >> "$PG_HBA_PATH"
+              fi
               systemctl restart postgresql@16-main
+              echo "✅ PostgreSQL authentication configured."
+            else
+              echo "❌ Could not find pg_hba.conf."
             fi
 
             # 6. Setup Nginx
@@ -96,6 +117,7 @@ jobs:
             EOF
             ln -sf /etc/nginx/sites-available/api.seiinstitute.com /etc/nginx/sites-enabled/
             nginx -t && systemctl restart nginx
+            echo "✅ Nginx configured."
 
             # 7. Setup environment
             cat > /var/www/sei-institute/backend/.env <<'EOF'
@@ -106,16 +128,22 @@ jobs:
             NODE_ENV="production"
             API_URL="http://api.seiinstitute.com"
             EOF
+            echo "✅ Environment variables set."
 
             # 8. Install Node.js and PM2
             if ! command -v node &> /dev/null; then
+              echo "Installing Node.js and PM2..."
               curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
               apt-get install -y nodejs
               npm install -g pm2
+              echo "✅ Node.js and PM2 installed."
+            else
+              echo "Node.js already installed."
+              npm install -g pm2
             fi
 
-            # 9. Deploy application files (will be transferred via SCP)
-            echo "Deploying application files..."
+            # 9. Prepare for application files
+            echo "Preparing for application deployment..."
 
       - name: Transfer Build Files
         if: github.ref == 'refs/heads/main'
@@ -123,7 +151,7 @@ jobs:
         with:
           host: 37.27.247.208
           username: root
-          password: ${{ secrets.SERVER_PASSWORD }}
+          password: gkjaRhMActfMatPW7nvd
           source: 'backend.tar.gz'
           target: '/var/www/sei-institute/backend'
 
@@ -133,20 +161,73 @@ jobs:
         with:
           host: 37.27.247.208
           username: root
-          password: ${{ secrets.SERVER_PASSWORD }}
+          password: gkjaRhMActfMatPW7nvd
           script: |
             cd /var/www/sei-institute/backend
+            echo "Extracting application files..."
             tar -xzf backend.tar.gz
             rm backend.tar.gz
 
-            # Install dependencies
-            npm install prisma @prisma/client fastify dotenv
+            # Check file structure
+            echo "Checking file structure..."
+            if [ -d "prisma" ]; then
+              echo "✅ Prisma directory found."
+              ls -la prisma/
+            else
+              echo "❌ Prisma directory not found!"
+              exit 1
+            fi
 
-            # Generate Prisma client and run migrations
+            # Install dependencies
+            echo "Installing application dependencies..."
+            npm install
+
+            # Generate Prisma client
+            echo "Generating Prisma client..."
             npx prisma generate
+
+            # Run migrations and verify
+            echo "Running database migrations..."
             npx prisma migrate deploy
 
+            # Verify migrations
+            if [ $? -eq 0 ]; then
+              echo "✅ Migrations completed successfully."
+            else
+              echo "❌ Migration failed! Trying to debug..."
+              # Check schema.prisma
+              if [ -f "prisma/schema.prisma" ]; then
+                echo "✅ schema.prisma exists."
+                cat prisma/schema.prisma
+              else
+                echo "❌ schema.prisma missing!"
+              fi
+              # Check database connection
+              echo "Testing database connection..."
+              npx prisma db pull --force
+            fi
+
+            # Run seed if a seed script exists
+            if [ -f "prisma/seed.js" ] || [ -f "prisma/seed.ts" ]; then
+              echo "Found seed file. Running database seeding..."
+              if grep -q "\"prisma\": {" package.json && grep -q "\"seed\":" package.json; then
+                echo "Running seed command from package.json..."
+                npx prisma db seed
+              else
+                echo "Executing seed file directly..."
+                if [ -f "prisma/seed.js" ]; then
+                  node prisma/seed.js
+                else
+                  npx ts-node prisma/seed.ts
+                fi
+              fi
+              echo "✅ Database seeded."
+            else
+              echo "⚠️ No seed file found. Database is not seeded."
+            fi
+
             # Start with PM2
+            echo "Starting application with PM2..."
             pm2 describe backend > /dev/null 2>&1
             if [ $? -eq 0 ]; then
               pm2 restart backend
@@ -155,4 +236,15 @@ jobs:
             fi
             pm2 save
 
+            # Verify application is running
+            echo "Verifying application is running..."
+            sleep 5
+            if pm2 show backend | grep -q "online"; then
+              echo "✅ Application is running."
+            else
+              echo "❌ Application failed to start!"
+              pm2 logs backend --lines 20
+            fi
+
             echo "==== Backend Deployment Complete ===="
+            echo "Try accessing http://api.seiinstitute.com/api/v1/admin/carousels"
