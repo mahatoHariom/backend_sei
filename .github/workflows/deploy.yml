@@ -33,7 +33,7 @@ jobs:
           password: gkjaRhMActfMatPW7nvd
           script: |
             set -e
-            DEPLOY_DIR="/var/www/sei-institute/backend"
+            DEPLOY_DIR="/var/www/sei-institute"
 
             # Fix ownership of the parent directory
             mkdir -p /var/www
@@ -55,6 +55,10 @@ jobs:
               git fetch origin
               git reset --hard origin/main
             fi
+
+            # Navigate to the backend directory
+            cd $DEPLOY_DIR/backend
+            BACKEND_DIR="$DEPLOY_DIR/backend"
 
             # Install PostgreSQL if not present
             if ! command -v psql &> /dev/null; then
@@ -83,8 +87,7 @@ jobs:
             psql -U postgres -h 127.0.0.1 -d sei -c "GRANT ALL PRIVILEGES ON SCHEMA public TO sei;"
 
             # Set environment variables with hardcoded sei/sei credentials
-            cd $DEPLOY_DIR
-            cat > .env << 'EOD'
+            cat > $BACKEND_DIR/.env << 'EOD'
             PORT=9000
             DATABASE_URL="postgresql://sei:sei@127.0.0.1:5432/sei?schema=public"
             CLIENT_ENDPOINT="https://seiinstitute.com"
@@ -97,17 +100,18 @@ jobs:
             EOD
 
             # Install dependencies
+            cd $BACKEND_DIR
             npm ci
 
             # Ensure Prisma schema is present
-            if [ ! -f "$DEPLOY_DIR/prisma/schema.prisma" ]; then
-              echo "Error: schema.prisma not found in $DEPLOY_DIR/prisma/"
+            if [ ! -f "$BACKEND_DIR/prisma/schema.prisma" ]; then
+              echo "Error: schema.prisma not found in $BACKEND_DIR/prisma/"
               exit 1
             fi
 
             # Run Prisma commands
-            npx prisma generate --schema=$DEPLOY_DIR/prisma/schema.prisma
-            npx prisma migrate deploy --schema=$DEPLOY_DIR/prisma/schema.prisma
+            npx prisma generate --schema=$BACKEND_DIR/prisma/schema.prisma
+            npx prisma migrate deploy --schema=$BACKEND_DIR/prisma/schema.prisma
 
             # Configure Nginx for API
             cat > /etc/nginx/sites-available/api.seiinstitute.com << 'EOD'
@@ -131,17 +135,18 @@ jobs:
             nginx -t && systemctl restart nginx
 
             # Build and start backend with PM2
+            cd $BACKEND_DIR
             npm run build
-            if [ ! -f "$DEPLOY_DIR/build/server.js" ]; then
+            if [ ! -f "$BACKEND_DIR/build/server.js" ]; then
               echo "Error: build/server.js not found after build"
-              ls -la $DEPLOY_DIR/build
+              ls -la $BACKEND_DIR/build
               exit 1
             fi
             if ! command -v pm2 &> /dev/null; then
               npm install -g pm2
             fi
             pm2 delete backend || true
-            pm2 start $DEPLOY_DIR/build/server.js --name backend
+            pm2 start $BACKEND_DIR/build/server.js --name backend
             pm2 save
             pm2 startup systemd -u root --hp /root
 
