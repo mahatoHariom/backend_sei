@@ -73,6 +73,8 @@ async function main() {
         data: {
           fullName: 'Admin User',
           email: 'admin@gmail.com',
+          // hashedPassword: hashedPassword,
+
           password: hashedPassword,
           isVerified: true,
           role: 'admin'
@@ -85,12 +87,12 @@ async function main() {
 
     // Create sample courses if they don't exist
     const coursesExist = await prisma.subject.count()
-    
+
     if (coursesExist < 5) {
       console.log('Creating sample courses...')
       // Delete existing courses for a clean slate
       await prisma.subject.deleteMany({})
-      
+
       const courses = [
         {
           name: 'Web Development Fundamentals',
