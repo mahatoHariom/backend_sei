@@ -41,7 +41,7 @@ jobs:
             echo "Ownership of /var/www fixed:"
             ls -ld /var/www
 
-            # Mark the deployment directory as safe for Git globally (before any Git commands)
+            # Mark the deployment directory as safe for Git
             git config --global --add safe.directory $DEPLOY_DIR
             echo "Safe directory set: $DEPLOY_DIR"
 
@@ -64,19 +64,25 @@ jobs:
               systemctl enable postgresql
             fi
 
-            # Configure PostgreSQL for trust authentication
-            if ! grep -q "host all all 127.0.0.1/32 trust" /etc/postgresql/*/main/pg_hba.conf; then
-              echo "host all all 127.0.0.1/32 trust" >> /etc/postgresql/*/main/pg_hba.conf
-              systemctl restart postgresql
-            fi
+            # Use the correct postgres password
+            POSTGRES_PASS="mahato"
+            export PGPASSWORD=$POSTGRES_PASS
 
-            # Setup PostgreSQL database and user
-            psql -U postgres -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'sei') THEN CREATE USER sei WITH PASSWORD 'sei'; END IF; END \$\$;"
-            psql -U postgres -c "DROP DATABASE IF EXISTS sei;" || true
-            psql -U postgres -c "CREATE DATABASE sei OWNER sei;"
-            psql -U postgres -d sei -c "GRANT ALL PRIVILEGES ON SCHEMA public TO sei;"
+            # Test PostgreSQL connection
+            psql -U postgres -h 127.0.0.1 -c "SELECT 1;" || {
+              echo "Error: Failed to connect to PostgreSQL with password 'mahato'"
+              cat /var/log/postgresql/postgresql-*-main.log | tail -n 20
+              exit 1
+            }
 
-            # Set environment variables
+            # Create database user and database
+            echo "Creating sei user and database..."
+            psql -U postgres -h 127.0.0.1 -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'sei') THEN CREATE USER sei WITH PASSWORD 'sei'; END IF; END \$\$;"
+            psql -U postgres -h 127.0.0.1 -c "DROP DATABASE IF EXISTS sei;" || true
+            psql -U postgres -h 127.0.0.1 -c "CREATE DATABASE sei OWNER sei;"
+            psql -U postgres -h 127.0.0.1 -d sei -c "GRANT ALL PRIVILEGES ON SCHEMA public TO sei;"
+
+            # Set environment variables with hardcoded sei/sei credentials
             cd $DEPLOY_DIR
             cat > .env << 'EOD'
             PORT=9000
