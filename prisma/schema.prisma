@@ -1,0 +1,150 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+generator client {
+    provider        = "prisma-client-js"
+    previewFeatures = ["fullTextSearch"]
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+model Carousel {
+    id          String   @id @default(uuid())
+    title       String
+    description String?
+    imageUrl    String
+    link        String?
+    active      Boolean  @default(true)
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
+}
+
+model Contact {
+    id        String   @id @default(uuid())
+    name      String
+    email     String
+    message   String
+    userId    String
+    phone     String
+    user      User     @relation("UserContacts", fields: [userId], references: [id], onDelete: Cascade)
+    createdAt DateTime @default(now())
+}
+
+model User {
+    id             String        @id @default(uuid())
+    email          String        @unique
+    fullName       String        @map("name")
+    hashedPassword String
+    isVerified     Boolean       @default(false)
+    role           UserRole      @default(USER)
+    createdAt      DateTime      @default(now())
+    updatedAt      DateTime      @updatedAt
+    userDetail     UserDetail?   @relation("UserDetailRelation")
+    contacts       Contact[]     @relation("UserContacts")
+    subjects       UserSubject[]
+    PdfFile        PdfFile[]
+    Practice       Practice[]
+}
+
+model Subject {
+    id          String        @id @default(uuid())
+    name        String        @unique
+    description String?
+    difficulty  String? // "Beginner", "Intermediate", "Advanced"
+    duration    String? // e.g. "8 weeks"
+    imageUrl    String? // Course cover image URL
+    courseType  String? // e.g. "Certificate", "Diploma", "Workshop"
+    tags        String[] // Array of tags like "Technology", "Programming"
+    badge       String? // Status indicator: e.g. "New", "Featured", "Popular"
+    students    Int? // Number of enrolled students
+    createdAt   DateTime      @default(now())
+    updatedAt   DateTime      @updatedAt
+    users       UserSubject[]
+    Practice    Practice[]
+}
+
+model UserSubject {
+    id        String   @id @default(uuid())
+    userId    String
+    subjectId String
+    user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+    subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+    createdAt DateTime @default(now())
+}
+
+model UserDetail {
+    id                String      @id @default(uuid())
+    phoneNumber       String?
+    address           String?
+    motherName        String?
+    fatherName        String?
+    parentContact     String?
+    schoolCollegeName String?
+    profilePicId      String?
+    profilePic        ProfilePic? @relation(fields: [profilePicId], references: [id], onDelete: SetNull)
+    user              User        @relation("UserDetailRelation", fields: [userId], references: [id], onDelete: Cascade)
+    userId            String      @unique
+}
+
+model ProfilePic {
+    id         String       @id @default(uuid())
+    publicId   String       @map("public_id")
+    url        String
+    createdAt  DateTime     @default(now())
+    updatedAt  DateTime     @updatedAt
+    UserDetail UserDetail[]
+}
+
+model PdfFile {
+    id            String   @id @default(uuid())
+    title         String
+    description   String?
+    filename      String // Original filename
+    path          String // File path on server
+    mimetype      String
+    size          Int // File size in bytes
+    downloadCount Int      @default(0)
+    uploadedBy    User     @relation(fields: [userId], references: [id])
+    userId        String
+    createdAt     DateTime @default(now())
+    updatedAt     DateTime @updatedAt
+}
+
+model Practice {
+    id             String             @id @default(uuid())
+    userId         String
+    subjectId      String
+    difficulty     Difficulty
+    score          Int                @default(0)
+    totalQuestions Int
+    completed      Boolean            @default(false)
+    user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+    subject        Subject            @relation(fields: [subjectId], references: [id])
+    questions      PracticeQuestion[]
+    createdAt      DateTime           @default(now())
+    updatedAt      DateTime           @updatedAt
+}
+
+model PracticeQuestion {
+    id          String   @id @default(uuid())
+    practiceId  String
+    question    String
+    options     Json // Array of options with correct answer marked
+    explanation String
+    isCorrect   Boolean? // Null until answered
+    practice    Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+    createdAt   DateTime @default(now())
+}
+
+enum Difficulty {
+    EASY
+    MEDIUM
+    HARD
+}
+
+enum UserRole {
+    ADMIN
+    USER
+}
