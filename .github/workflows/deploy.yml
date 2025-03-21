@@ -13,32 +13,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Verify backend directory exists
-      - name: Check directory structure
-        run: |
-          ls -la
-          if [ ! -d "backend" ]; then
-            echo "Error: backend directory not found in repository root"
-            exit 1
-          fi
-          echo "Repository structure verified. Backend directory exists."
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: 'backend/package-lock.json'
+          cache-dependency-path: 'package-lock.json'
 
       - name: Install Dependencies
-        run: |
-          cd backend
-          npm ci
+        run: npm ci
 
       - name: Build
-        run: |
-          cd backend
-          npm run build
+        run: npm run build
 
       - name: Deploy to Server
         if: github.ref == 'refs/heads/main'
@@ -50,44 +36,43 @@ jobs:
           script: |
             echo "==== Starting deployment ===="
 
-            # Create or update backend repository
+            # Create the backend directory if it doesn't exist
             if [ ! -d "/var/www/sei-institute/backend" ]; then
               echo "Creating backend directory..."
               mkdir -p /var/www/sei-institute/backend
             fi
 
+            # Create a temporary directory for the repository
+            echo "Setting up temporary directory..."
+            rm -rf /var/www/sei-institute/tmp-repo || true
+            mkdir -p /var/www/sei-institute/tmp-repo
+
+            # Clone the repository to the temporary directory
             echo "Cloning repository..."
             git clone --single-branch --branch main https://github.com/${{ github.repository }}.git /var/www/sei-institute/tmp-repo
 
-            echo "Checking repository structure..."
-            if [ ! -d "/var/www/sei-institute/tmp-repo/backend" ]; then
-              echo "ERROR: backend directory not found in repository!"
-              ls -la /var/www/sei-institute/tmp-repo
-              exit 1
-            fi
+            # Copy all files from the repository to the backend directory
+            echo "Copying files to backend directory..."
+            cp -rf /var/www/sei-institute/tmp-repo/* /var/www/sei-institute/backend/
+            cp -rf /var/www/sei-institute/tmp-repo/.* /var/www/sei-institute/backend/ 2>/dev/null || echo "No hidden files to copy"
 
-            echo "Copying backend files..."
-            cp -rf /var/www/sei-institute/tmp-repo/backend/* /var/www/sei-institute/backend/
-
-            # Copy hidden files too
-            cp -rf /var/www/sei-institute/tmp-repo/backend/.??* /var/www/sei-institute/backend/ 2>/dev/null || echo "No hidden files to copy"
-
-            echo "Cleaning up temporary repository..."
+            # Clean up the temporary directory
+            echo "Cleaning up..."
             rm -rf /var/www/sei-institute/tmp-repo
 
-            echo "Checking backend directory contents..."
+            # Check backend directory contents
+            echo "Backend directory contents:"
             ls -la /var/www/sei-institute/backend
 
-            # Ensure prisma directory exists
+            # Verify prisma directory and schema
+            echo "Checking Prisma configuration..."
             if [ ! -d "/var/www/sei-institute/backend/prisma" ]; then
               echo "ERROR: Prisma directory not found!"
               exit 1
             fi
 
-            # Check for schema.prisma file
             if [ ! -f "/var/www/sei-institute/backend/prisma/schema.prisma" ]; then
               echo "ERROR: schema.prisma file not found!"
-              find /var/www/sei-institute/backend -name "schema.prisma" -type f
               exit 1
             fi
 
@@ -182,17 +167,17 @@ jobs:
             API_URL="http://api.seiinstitute.com"
             EOD
 
-            # Install dependencies
-            echo "Installing backend dependencies..."
+            # Change to backend directory
             cd /var/www/sei-institute/backend
+
+            # Install dependencies
+            echo "Installing dependencies..."
             npm ci
 
             # Generate Prisma client
             echo "Generating Prisma client..."
-            cd /var/www/sei-institute/backend
             npx prisma generate --schema=./prisma/schema.prisma || {
               echo "ERROR: Failed to generate Prisma client"
-              cat ./prisma/schema.prisma || echo "Cannot read schema.prisma"
               exit 1
             }
 
@@ -214,7 +199,6 @@ jobs:
 
             # Build application
             echo "Building application..."
-            cd /var/www/sei-institute/backend
             npm run build
 
             # Verify build output
@@ -237,8 +221,6 @@ jobs:
               npm install -g pm2
             fi
 
-            cd /var/www/sei-institute/backend
-
             # Check if app is already running
             if pm2 list | grep -q "backend"; then
               echo "Restarting backend service..."
@@ -257,4 +239,4 @@ jobs:
             echo "Verifying database connection..."
             npx prisma db pull --schema=./prisma/schema.prisma || echo "Database verification warning (non-fatal)"
 
-            echo "==== Deployment completed successfully! ===="
+            echo "==== Deployment completed successfully! ====="
