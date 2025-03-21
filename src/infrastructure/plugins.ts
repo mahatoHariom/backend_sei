@@ -14,7 +14,7 @@ export async function registerPlugins(app: FastifyInstance) {
   // Security plugins
   await app.register(cors, {
     credentials: true,
-    origin: [process.env.CLIENT_ENDPOINT as string]
+    origin: ['https://seiinstitute.com']
   })
 
   await app.register(helmet, {
@@ -51,7 +51,7 @@ export async function registerPlugins(app: FastifyInstance) {
       },
       servers: [
         {
-          url: process.env.API_URL || 'http://localhost:9000'
+          url: 'https://api.seiinstitute.com'
         }
       ],
       components: {

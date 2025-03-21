@@ -59,7 +59,7 @@ export const swaggerOptions = {
       url: 'https://swagger.io',
       description: 'Find more info here'
     },
-    servers: [{ url: 'http://localhost:9000' }],
+    servers: [{ url: 'https://api.seiinstitute.com' }],
     components: {
       securitySchemes: {
         bearerAuth: {

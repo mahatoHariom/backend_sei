@@ -86,16 +86,17 @@ jobs:
             GRANT ALL ON SCHEMA public TO sei_prod_user;
             EOD
 
-            # Set production environment variables in .env file
+            # Set production environment variables in .env file with hardcoded values
             cat > /var/www/sei-institute/backend/.env <<EOD
             PORT=9000
             DATABASE_URL="postgresql://sei_prod_user:StrongP@ssw0rd123@127.0.0.1:5432/sei_institute?schema=public"
-            CLIENT_ENDPOINT="http://seiinstitute.com"
+            CLIENT_ENDPOINT="https://seiinstitute.com"
             JWT_SECRET="mahatohariomsfadfnasldkjf"
             ACCESS_TOKEN_EXPIRES="1d"
             REFRESH_TOKEN_EXPIRES="7d"
             NODE_ENV="production"
             HUGGING_FACE_KEY="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"
+            API_URL="https://api.seiinstitute.com"
             EOD
 
             # Install dependencies and fix vulnerabilities
