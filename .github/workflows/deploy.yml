@@ -27,7 +27,7 @@ jobs:
         run: npm run build
 
       - name: Archive Build
-        run: tar -czf backend.tar.gz build package.json package-lock.json prisma src node_modules
+        run: tar -czf backend.tar.gz build package.json package-lock.json prisma src
 
       - name: Deploy to Server
         if: github.ref == 'refs/heads/main'
@@ -48,44 +48,58 @@ jobs:
             mkdir -p /var/www/sei-institute/backend
 
             # 3. Install required packages
-            apt-get update
+            apt-get update -y
             apt-get install -y postgresql-16 nginx
 
             # 4. Initialize PostgreSQL cluster if not already done
-            if [ ! -d "/var/lib/postgresql/16/main" ]; then
+            echo "Setting up PostgreSQL..."
+            if [ ! -d "/var/lib/postgresql/16/main" ] || [ ! -f "/etc/postgresql/16/main/postgresql.conf" ]; then
               echo "Initializing PostgreSQL cluster..."
               mkdir -p /var/lib/postgresql/16/main
-              chown -R postgres:postgres /var/lib/postgresql
-              sudo -u postgres /usr/lib/postgresql/16/bin/initdb -D /var/lib/postgresql/16/main
               mkdir -p /etc/postgresql/16/main
+              chown -R postgres:postgres /var/lib/postgresql /etc/postgresql
+              sudo -u postgres /usr/lib/postgresql/16/bin/initdb -D /var/lib/postgresql/16/main
               cp /var/lib/postgresql/16/main/*.conf /etc/postgresql/16/main/
               sed -i "s|^#data_directory.*|data_directory = '/var/lib/postgresql/16/main'|" /etc/postgresql/16/main/postgresql.conf
-              systemctl restart postgresql@16-main || systemctl start postgresql@16-main
-              echo "PostgreSQL cluster initialized."
+              sed -i "s|^#listen_addresses.*|listen_addresses = 'localhost'|" /etc/postgresql/16/main/postgresql.conf
+              systemctl daemon-reload
+              systemctl start postgresql@16-main || { echo "❌ Failed to start PostgreSQL"; exit 1; }
+              systemctl enable postgresql@16-main
+              echo "✅ PostgreSQL cluster initialized."
             else
               echo "PostgreSQL cluster already exists."
               systemctl restart postgresql@16-main || systemctl start postgresql@16-main
             fi
 
+            # Verify PostgreSQL is running
+            if systemctl is-active postgresql@16-main >/dev/null; then
+              echo "✅ PostgreSQL is running."
+            else
+              echo "❌ PostgreSQL failed to start!"
+              journalctl -u postgresql@16-main -n 20
+              exit 1
+            fi
+
             # 5. Setup PostgreSQL user and database
             echo "Setting up PostgreSQL user and database..."
-            sudo -u postgres psql -c "CREATE USER sei WITH PASSWORD 'sei';" 2>/dev/null || sudo -u postgres psql -c "ALTER USER sei WITH PASSWORD 'sei';"
+            sudo -u postgres psql -c "DROP ROLE IF EXISTS sei;" 2>/dev/null || true
+            sudo -u postgres psql -c "CREATE ROLE sei WITH LOGIN PASSWORD 'sei' CREATEDB;" 2>/dev/null || true
             sudo -u postgres psql -c "DROP DATABASE IF EXISTS sei;" 2>/dev/null || true
-            sudo -u postgres psql -c "CREATE DATABASE sei;" 2>/dev/null || sudo -u postgres createdb sei
+            sudo -u postgres psql -c "CREATE DATABASE sei OWNER sei;" 2>/dev/null || sudo -u postgres createdb -O sei sei
             sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;"
 
             # Verify database creation
-            if sudo -u postgres psql -l | grep sei; then
+            if sudo -u postgres psql -l | grep -q sei; then
               echo "✅ Database 'sei' created successfully."
             else
               echo "❌ Failed to create database 'sei'."
+              sudo -u postgres psql -c "\l"
               exit 1
             fi
 
             # Configure PostgreSQL authentication
             PG_HBA_PATH=$(find /etc/postgresql -name "pg_hba.conf" | head -n 1)
             if [ -f "$PG_HBA_PATH" ]; then
-              # Check if entries already exist before adding
               if ! grep -q "local.*sei.*md5" "$PG_HBA_PATH"; then
                 echo "local   all   sei   md5" >> "$PG_HBA_PATH"
               fi
@@ -96,6 +110,7 @@ jobs:
               echo "✅ PostgreSQL authentication configured."
             else
               echo "❌ Could not find pg_hba.conf."
+              exit 1
             fi
 
             # 6. Setup Nginx
@@ -115,8 +130,9 @@ jobs:
                 }
             }
             EOF
+            rm -f /etc/nginx/sites-enabled/default
             ln -sf /etc/nginx/sites-available/api.seiinstitute.com /etc/nginx/sites-enabled/
-            nginx -t && systemctl restart nginx
+            nginx -t && systemctl restart nginx || { echo "❌ Nginx configuration failed"; exit 1; }
             echo "✅ Nginx configured."
 
             # 7. Setup environment
@@ -139,7 +155,7 @@ jobs:
               echo "✅ Node.js and PM2 installed."
             else
               echo "Node.js already installed."
-              npm install -g pm2
+              npm install -g pm2 --force
             fi
 
             # 9. Prepare for application files
@@ -170,55 +186,58 @@ jobs:
 
             # Check file structure
             echo "Checking file structure..."
-            if [ -d "prisma" ]; then
-              echo "✅ Prisma directory found."
+            if [ -d "prisma" ] && [ -f "prisma/schema.prisma" ]; then
+              echo "✅ Prisma directory and schema.prisma found."
               ls -la prisma/
             else
-              echo "❌ Prisma directory not found!"
+              echo "❌ Prisma directory or schema.prisma not found!"
+              ls -la
               exit 1
             fi
 
-            # Install dependencies
-            echo "Installing application dependencies..."
-            npm install
+            # Install minimal dependencies for Prisma
+            echo "Installing Prisma dependencies..."
+            npm install prisma @prisma/client dotenv --no-save
 
             # Generate Prisma client
             echo "Generating Prisma client..."
-            npx prisma generate
+            npx prisma generate || { echo "❌ Prisma generate failed"; cat prisma/schema.prisma; exit 1; }
 
-            # Run migrations and verify
-            echo "Running database migrations..."
-            npx prisma migrate deploy
-
-            # Verify migrations
-            if [ $? -eq 0 ]; then
-              echo "✅ Migrations completed successfully."
+            # Handle migrations
+            echo "Handling database migrations..."
+            if [ -d "prisma/migrations" ] && [ -n "$(ls -A prisma/migrations)" ]; then
+              echo "Applying existing migrations..."
+              npx prisma migrate deploy || { echo "❌ Migrate deploy failed"; exit 1; }
             else
-              echo "❌ Migration failed! Trying to debug..."
-              # Check schema.prisma
-              if [ -f "prisma/schema.prisma" ]; then
-                echo "✅ schema.prisma exists."
-                cat prisma/schema.prisma
-              else
-                echo "❌ schema.prisma missing!"
-              fi
-              # Check database connection
-              echo "Testing database connection..."
-              npx prisma db pull --force
+              echo "No migrations found. Creating initial migration..."
+              npx prisma migrate dev --name init --create-only || { echo "❌ Migrate dev failed"; cat prisma/schema.prisma; exit 1; }
+              npx prisma migrate deploy || { echo "❌ Migrate deploy failed after init"; exit 1; }
             fi
 
-            # Run seed if a seed script exists
+            # Verify database schema
+            echo "Verifying database schema..."
+            npx prisma db pull --force > schema_check.txt 2>&1
+            if grep -q "Error" schema_check.txt; then
+              echo "❌ Database schema verification failed!"
+              cat schema_check.txt
+              exit 1
+            else
+              echo "✅ Database schema verified."
+            fi
+
+            # Run seed if available
             if [ -f "prisma/seed.js" ] || [ -f "prisma/seed.ts" ]; then
               echo "Found seed file. Running database seeding..."
               if grep -q "\"prisma\": {" package.json && grep -q "\"seed\":" package.json; then
                 echo "Running seed command from package.json..."
-                npx prisma db seed
+                npx prisma db seed || { echo "❌ Seeding failed"; exit 1; }
               else
                 echo "Executing seed file directly..."
                 if [ -f "prisma/seed.js" ]; then
-                  node prisma/seed.js
+                  node prisma/seed.js || { echo "❌ Seed.js failed"; exit 1; }
                 else
-                  npx ts-node prisma/seed.ts
+                  npm install ts-node --no-save
+                  npx ts-node prisma/seed.ts || { echo "❌ Seed.ts failed"; exit 1; }
                 fi
               fi
               echo "✅ Database seeded."
@@ -244,6 +263,7 @@ jobs:
             else
               echo "❌ Application failed to start!"
               pm2 logs backend --lines 20
+              exit 1
             fi
 
             echo "==== Backend Deployment Complete ===="
