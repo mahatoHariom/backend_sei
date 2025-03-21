@@ -35,16 +35,23 @@ jobs:
             set -e
             DEPLOY_DIR="/var/www/sei-institute/backend"
 
-            # Ensure directory exists and has correct ownership
-            mkdir -p /var/www/sei-institute
-            chown -R root:root /var/www/sei-institute
+            # Fix ownership of the parent directory
+            mkdir -p /var/www
+            chown -R root:root /var/www
+            echo "Ownership of /var/www fixed:"
+            ls -ld /var/www
+
+            # Mark the deployment directory as safe for Git globally (before any Git commands)
+            git config --global --add safe.directory $DEPLOY_DIR
+            echo "Safe directory set: $DEPLOY_DIR"
 
             # Clone or update repository
             if [ ! -d "$DEPLOY_DIR" ]; then
+              echo "Cloning repository to $DEPLOY_DIR..."
               git clone --single-branch --branch main https://github.com/${{ github.repository }}.git $DEPLOY_DIR
             else
+              echo "Updating repository in $DEPLOY_DIR..."
               cd $DEPLOY_DIR
-              git config --global --add safe.directory $DEPLOY_DIR
               git fetch origin
               git reset --hard origin/main
             fi
@@ -57,7 +64,7 @@ jobs:
               systemctl enable postgresql
             fi
 
-            # Configure PostgreSQL for passwordless access (trust method)
+            # Configure PostgreSQL for trust authentication
             if ! grep -q "host all all 127.0.0.1/32 trust" /etc/postgresql/*/main/pg_hba.conf; then
               echo "host all all 127.0.0.1/32 trust" >> /etc/postgresql/*/main/pg_hba.conf
               systemctl restart postgresql
@@ -92,11 +99,11 @@ jobs:
               exit 1
             fi
 
-            # Run Prisma commands with explicit schema location
+            # Run Prisma commands
             npx prisma generate --schema=$DEPLOY_DIR/prisma/schema.prisma
             npx prisma migrate deploy --schema=$DEPLOY_DIR/prisma/schema.prisma
 
-            # Configure Nginx for API (HTTP initially)
+            # Configure Nginx for API
             cat > /etc/nginx/sites-available/api.seiinstitute.com << 'EOD'
             server {
                 listen 80;
@@ -132,7 +139,7 @@ jobs:
             pm2 save
             pm2 startup systemd -u root --hp /root
 
-            # Install Certbot and configure SSL for API
+            # Install Certbot and configure SSL
             if ! command -v certbot &> /dev/null; then
               apt-get update
               apt-get install -y certbot python3-certbot-nginx
