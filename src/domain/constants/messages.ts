@@ -9,7 +9,7 @@ export const Messages = {
   USER_NOT_AUTHENTICATED: 'User not authenticated',
   FORBIDDEN_ACCESS: 'Forbidden access',
   FILE_NOT_FOUND: 'File not found',
-  FILE_DELETE_ERROR: 'Error deleting file',
+  FILE_DELETE_ERROR: 'Error deleting file'
 }
 
 export enum StatusCode {

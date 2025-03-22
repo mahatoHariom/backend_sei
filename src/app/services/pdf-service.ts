@@ -14,16 +14,21 @@ import { IPdfRepository } from '@/domain/interfaces/pdf-interface'
 export class PdfService {
   constructor(@inject(TYPES.IPdfRepository) private pdfRepository: IPdfRepository) {}
 
-  async uploadPdf(file: {
-    fieldname: string,
-    originalname: string,
-    encoding: string,
-    mimetype: string,
-    destination: string,
-    filename: string,
-    path: string,
-    size: number
-  }, userId: string, title: string, description?: string): Promise<any> {
+  async uploadPdf(
+    file: {
+      fieldname: string
+      originalname: string
+      encoding: string
+      mimetype: string
+      destination: string
+      filename: string
+      path: string
+      size: number
+    },
+    userId: string,
+    title: string,
+    description?: string
+  ): Promise<any> {
     return this.pdfRepository.create({
       title,
       description,
