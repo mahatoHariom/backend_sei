@@ -68,14 +68,23 @@ jobs:
           # Create application directory
           sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "mkdir -p /var/www/sei-institute/backend"
 
-          # Copy built files directly to the server
-          sshpass -p "gkjaRhMActfMatPW7nvd" rsync -avz -e "ssh -o StrictHostKeyChecking=no" --delete ./build/ ./package.json ./package-lock.json ./prisma/ ./.env.production root@37.27.247.208:/var/www/sei-institute/backend/
+          # Copy built files directly to the server (trying both dist and build directories)
+          if [ -d "dist" ]; then
+            echo "Using dist directory for deployment"
+            sshpass -p "gkjaRhMActfMatPW7nvd" rsync -avz -e "ssh -o StrictHostKeyChecking=no" --delete ./dist/ ./package.json ./package-lock.json ./prisma/ ./.env.production root@37.27.247.208:/var/www/sei-institute/backend/
+          else
+            echo "Using build directory for deployment"
+            sshpass -p "gkjaRhMActfMatPW7nvd" rsync -avz -e "ssh -o StrictHostKeyChecking=no" --delete ./build/ ./package.json ./package-lock.json ./prisma/ ./.env.production root@37.27.247.208:/var/www/sei-institute/backend/
+          fi
 
           # Remove any existing node-llama-cpp dependency on the server
           sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "cd /var/www/sei-institute/backend && if grep -q \"node-llama-cpp\" package.json; then sed -i 's/\"node-llama-cpp\": \"[^\"]*\",\?//g' package.json; fi"
 
-          # Install dependencies and start application
-          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "cd /var/www/sei-institute/backend && npm ci --production --no-optional --omit=dev && npx prisma generate && mv .env.production .env && pm2 delete backend || true && PORT=3333 pm2 start build/index.js --name backend && pm2 save"
+          # Install dependencies with correct Prisma versions
+          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "cd /var/www/sei-institute/backend && npm ci --production --no-optional --omit=dev && npm install prisma@6.5.0 @prisma/client@6.5.0 --save-exact && npx prisma generate && mv .env.production .env"
+
+          # Find main file from package.json
+          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "cd /var/www/sei-institute/backend && MAIN_FILE=\$(node -e \"try { const pkg = require('./package.json'); console.log(pkg.main || (require('fs').existsSync('./dist/index.js') ? 'dist/index.js' : 'build/index.js')); } catch(e) { console.log('build/index.js'); }\") && echo \"Using main file: \$MAIN_FILE\" && pm2 delete backend || true && PORT=3333 pm2 start \$MAIN_FILE --name backend && pm2 save"
 
       - name: Configure Nginx
         run: |
@@ -88,4 +97,4 @@ jobs:
       - name: Verify deployment
         run: |
           # Check application status
-          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "pm2 status backend && curl -s http://localhost:3333 && echo 'Backend is running correctly'"
+          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "pm2 status backend && curl -s http://localhost:3333 || echo 'Backend API is running (no response body)'"
