@@ -85,46 +85,47 @@ jobs:
             fi
 
             # 5. Setup PostgreSQL user and database
-            echo "Setting up PostgreSQL user and database..."
-            sudo -u postgres psql -c "DROP ROLE IF EXISTS sei;" 2>/dev/null || true
-            sudo -u postgres psql -c "CREATE ROLE sei WITH LOGIN PASSWORD 'sei' CREATEDB CREATEROLE SUPERUSER;" 2>/dev/null || true
-            sudo -u postgres psql -c "DROP DATABASE IF EXISTS sei;" 2>/dev/null || true
-            sudo -u postgres psql -c "CREATE DATABASE sei OWNER sei;" 2>/dev/null || sudo -u postgres createdb -O sei sei
-            sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;"
-            sudo -u postgres psql -c "ALTER USER sei WITH CREATEDB;"
-
-            # Verify database creation
-            if sudo -u postgres psql -l | grep -q sei; then
-              echo "✅ Database 'sei' created successfully."
+            echo "Checking PostgreSQL connection..."
+            if systemctl is-active postgresql@16-main >/dev/null; then
+              echo "✅ PostgreSQL is running."
             else
-              echo "❌ Failed to create database 'sei'."
-              sudo -u postgres psql -c "\l"
-              exit 1
+              echo "PostgreSQL is not running. Starting service..."
+              systemctl start postgresql@16-main || { echo "❌ Failed to start PostgreSQL"; exit 1; }
             fi
 
-            # Configure PostgreSQL authentication
+            # Ensure sei user and database exist (but don't recreate if they already exist)
+            if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='sei'" | grep -q 1; then
+              echo "Creating sei user..."
+              sudo -u postgres psql -c "CREATE ROLE sei WITH LOGIN PASSWORD 'sei' CREATEDB CREATEROLE SUPERUSER;"
+            else
+              echo "User 'sei' already exists."
+            fi
+
+            if ! sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw sei; then
+              echo "Creating sei database..."
+              sudo -u postgres psql -c "CREATE DATABASE sei OWNER sei;"
+              sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;"
+            else
+              echo "Database 'sei' already exists."
+            fi
+
+            # Configure PostgreSQL authentication if needed
             PG_HBA_PATH=$(find /etc/postgresql -name "pg_hba.conf" | head -n 1)
             if [ -f "$PG_HBA_PATH" ]; then
-              # Backup original configuration
-              cp "$PG_HBA_PATH" "${PG_HBA_PATH}.bak"
-              
-              # Update authentication rules for the sei user
-              sed -i '/^local.*sei/d' "$PG_HBA_PATH"
-              sed -i '/^host.*sei.*127.0.0.1/d' "$PG_HBA_PATH"
-              
-              # Add specific authentication rules for sei user
-              echo "local   all   sei   md5" >> "$PG_HBA_PATH"
-              echo "host    all   sei   127.0.0.1/32   md5" >> "$PG_HBA_PATH"
-              echo "host    all   sei   ::1/128   md5" >> "$PG_HBA_PATH"
-              
-              # Add trust authentication for localhost during deployment
-              echo "local   all   postgres   trust" >> "$PG_HBA_PATH"
-              
-              systemctl restart postgresql@16-main
-              echo "✅ PostgreSQL authentication configured."
+              # Only update authentication rules if they don't exist
+              if ! grep -q "local.*all.*sei.*md5" "$PG_HBA_PATH"; then
+                echo "Updating PostgreSQL authentication..."
+                echo "local   all   sei   md5" >> "$PG_HBA_PATH"
+                echo "host    all   sei   127.0.0.1/32   md5" >> "$PG_HBA_PATH"
+                echo "host    all   sei   ::1/128   md5" >> "$PG_HBA_PATH"
+                
+                systemctl restart postgresql@16-main
+                echo "✅ PostgreSQL authentication configured."
+              else
+                echo "PostgreSQL authentication already configured."
+              fi
             else
-              echo "❌ Could not find pg_hba.conf."
-              exit 1
+              echo "⚠️ Could not find pg_hba.conf, authentication might need manual configuration."
             fi
 
             # 6. Setup Nginx
@@ -220,48 +221,77 @@ jobs:
             # Handle migrations
             echo "Handling database migrations..."
             if [ -d "prisma/migrations" ] && [ -n "$(ls -A prisma/migrations)" ]; then
-              echo "Applying existing migrations..."
-              npx prisma migrate deploy || { echo "❌ Migrate deploy failed"; npx prisma migrate status; exit 1; }
-            else
-              echo "No migrations found. Creating initial migration..."
-              # First try with the --create-only flag to avoid shadow DB issues
-              npx prisma migrate dev --name init --create-only || { 
-                echo "❌ Could not create migration with --create-only flag"
+              echo "Applying migrations safely..."
+              npx prisma migrate deploy || { 
+                echo "⚠️ Migration deploy encountered issues. Attempting to resolve..."
                 # Give the sei user superuser permission temporarily for this operation
                 sudo -u postgres psql -c "ALTER USER sei WITH SUPERUSER;"
-                # Now try the migration again
-                npx prisma migrate dev --name init || { echo "❌ Migrate dev failed even with superuser privileges"; exit 1; }
+                npx prisma migrate deploy || { echo "❌ Migrate deploy failed"; npx prisma migrate status; exit 1; }
               }
-              npx prisma migrate deploy || { echo "❌ Migrate deploy failed after init"; npx prisma migrate status; exit 1; }
-            fi
-
-            # Verify database schema
-            echo "Verifying database schema..."
-            npx prisma db pull --force > schema_check.txt 2>&1
-            if grep -q "Error" schema_check.txt; then
-              echo "❌ Database schema verification failed!"
-              cat schema_check.txt
-              exit 1
+              echo "✅ Migrations applied successfully."
             else
-              echo "✅ Database schema verified."
+              echo "No migrations found. Checking schema compatibility..."
+              # Check if we need to create a migration
+              npx prisma migrate status > /dev/null 2>&1 || {
+                echo "Creating initial migration for schema tracking..."
+                sudo -u postgres psql -c "ALTER USER sei WITH SUPERUSER;"
+                npx prisma db push --accept-data-loss-with-warning=false || {
+                  echo "⚠️ Schema push encountered issues - attempting migration instead"
+                  npx prisma migrate dev --name init --create-only || {
+                    echo "❌ Could not create migration"
+                    exit 1
+                  }
+                  npx prisma migrate deploy || { echo "❌ Migrate deploy failed"; exit 1; }
+                }
+              }
             fi
 
-            # Run seed if available
-            if [ -f "prisma/seed.js" ] || [ -f "prisma/seed.ts" ]; then
-              echo "Found seed file. Running database seeding..."
-              if grep -q "\"prisma\": {" package.json && grep -q "\"seed\":" package.json; then
-                echo "Running seed command from package.json..."
-                npx prisma db seed || { echo "❌ Seeding failed"; exit 1; }
+            # Verify database connectivity but don't modify schema
+            echo "Verifying database connectivity..."
+            npx prisma db pull --print > /dev/null 2>&1 || {
+              echo "⚠️ Database connectivity check failed!"
+              exit 1
+            }
+            echo "✅ Database connectivity verified."
+
+            # Run seed if specifically requested or only on fresh database
+            if [ -f ".seed_required" ] || [ -f "prisma/seed.js" ] || [ -f "prisma/seed.ts" ]; then
+              if [ -f ".seed_required" ]; then
+                echo "Seed explicitly requested. Running database seeding..."
+                rm -f .seed_required
               else
-                echo "Executing seed file directly..."
-                if [ -f "prisma/seed.js" ]; then
-                  node prisma/seed.js || { echo "❌ Seed.js failed"; exit 1; }
+                # Check if the database is empty
+                TABLES_COUNT=$(sudo -u postgres psql -d sei -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'")
+                if [ "$TABLES_COUNT" -le "1" ]; then
+                  echo "Fresh database detected. Running seeding..."
                 else
-                  npm install ts-node --no-save
-                  npx ts-node prisma/seed.ts || { echo "❌ Seed.ts failed"; exit 1; }
+                  echo "Database already contains data. Skipping seed."
+                  # Jump to the start command
+                  echo "✅ Using existing database data."
+                  # Create a skip flag
+                  touch .seed_skipped
                 fi
               fi
-              echo "✅ Database seeded."
+              
+              # Only proceed with seeding if we haven't decided to skip
+              if [ ! -f ".seed_skipped" ]; then
+                if grep -q "\"prisma\": {" package.json && grep -q "\"seed\":" package.json; then
+                  echo "Running seed command from package.json..."
+                  npx prisma db seed || { echo "❌ Seeding failed"; exit 1; }
+                else
+                  echo "Executing seed file directly..."
+                  if [ -f "prisma/seed.js" ]; then
+                    node prisma/seed.js || { echo "❌ Seed.js failed"; exit 1; }
+                  else
+                    npm install ts-node --no-save
+                    npx ts-node prisma/seed.ts || { echo "❌ Seed.ts failed"; exit 1; }
+                  fi
+                fi
+                echo "✅ Database seeded."
+              else
+                # Remove the skip flag
+                rm -f .seed_skipped
+              fi
             else
               echo "⚠️ No seed file found. Database is not seeded."
             fi

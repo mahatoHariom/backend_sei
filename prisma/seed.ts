@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import * as bcrypt from 'bcrypt'
+import fs from 'fs'
+import path from 'path'
 
 const prisma = new PrismaClient()
 
@@ -56,9 +58,52 @@ const subjects = [
   }
 ]
 
+async function ensureUploadsDirectoryExists() {
+  const uploadsPath = path.join(process.cwd(), 'uploads')
+  if (!fs.existsSync(uploadsPath)) {
+    fs.mkdirSync(uploadsPath, { recursive: true })
+  }
+  return uploadsPath
+}
+
+async function copySeedImagesToUploads() {
+  // Path to seed images (adjust as needed)
+  const seedImagesPath = path.join(process.cwd(), 'prisma', 'seed-images')
+  const uploadsPath = await ensureUploadsDirectoryExists()
+
+  // Check if seed images directory exists
+  if (!fs.existsSync(seedImagesPath)) {
+    console.log('No seed images directory found. Skipping image copy.')
+    return []
+  }
+
+  // Get all files from seed images
+  const files = fs.readdirSync(seedImagesPath).filter((file) => {
+    return file.match(/\.(jpg|jpeg|png|gif)$/i)
+  })
+
+  // Copy each file to uploads and return the resulting filenames
+  return files.map((file) => {
+    const newFilename = `seed-${Date.now()}-${file}`
+    const sourcePath = path.join(seedImagesPath, file)
+    const destinationPath = path.join(uploadsPath, newFilename)
+
+    // Copy the file only if it doesn't already exist
+    if (!fs.existsSync(destinationPath)) {
+      fs.copyFileSync(sourcePath, destinationPath)
+      console.log(`Copied seed image ${file} to uploads`)
+    }
+
+    return newFilename
+  })
+}
+
 async function main() {
   try {
     console.log('Starting database seeding...')
+
+    // Copy seed images to uploads folder
+    const imageFiles = await copySeedImagesToUploads()
 
     // Create admin user if none exists
     const adminExists = await prisma.user.findFirst({
@@ -189,6 +234,28 @@ async function main() {
       console.log(`✅ ${courses.length} sample courses created successfully`)
     } else {
       console.log('ℹ️ Courses already exist, skipping creation')
+    }
+
+    // Add carousel images (if we have seed images)
+    if (imageFiles.length > 0) {
+      // Get existing carousels
+      const existingCarousels = await prisma.carousel.findMany()
+
+      if (existingCarousels.length === 0) {
+        // Only seed carousels if none exist
+        const carousels = await Promise.all(
+          imageFiles.map((file) =>
+            prisma.carousel.create({
+              data: {
+                imageUrl: `/uploads/${file}`
+              }
+            })
+          )
+        )
+        console.log(`Created ${carousels.length} carousel items`)
+      } else {
+        console.log(`Skipping carousel creation as ${existingCarousels.length} already exist`)
+      }
     }
 
     console.log('✅ Database seeding completed successfully')
