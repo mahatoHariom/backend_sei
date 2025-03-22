@@ -21,11 +21,7 @@ jobs:
           cache-dependency-path: 'package-lock.json'
 
       - name: Install Dependencies
-        run: |
-          # Ensure package-lock.json is in sync with package.json
-          npm install
-          # Perform clean install
-          npm ci
+        run: npm ci
 
       - name: Build
         run: npm run build
@@ -33,324 +29,75 @@ jobs:
       - name: Archive Build
         run: tar -czf backend.tar.gz build package.json package-lock.json prisma src
 
-      - name: Deploy to Server
-        if: github.ref == 'refs/heads/main'
-        uses: appleboy/ssh-action@master
-        with:
-          host: 37.27.247.208
-          username: root
-          password: gkjaRhMActfMatPW7nvd
-          script: |
-            echo "==== Starting Backend Deployment ===="
-
-            # 1. Clean up existing backend
-            pm2 stop backend || true
-            pm2 delete backend || true
-            rm -rf /var/www/sei-institute/backend
-
-            # 2. Create necessary directories
-            mkdir -p /var/www/sei-institute/backend
-
-            # 3. Install required packages
-            apt-get update -y
-            apt-get install -y postgresql-16 nginx
-
-            # 4. Initialize PostgreSQL cluster if not already done
-            echo "Setting up PostgreSQL..."
-            if [ ! -d "/var/lib/postgresql/16/main" ] || [ ! -f "/etc/postgresql/16/main/postgresql.conf" ]; then
-              echo "Initializing PostgreSQL cluster..."
-              mkdir -p /var/lib/postgresql/16/main
-              mkdir -p /etc/postgresql/16/main
-              chown -R postgres:postgres /var/lib/postgresql /etc/postgresql
-              sudo -u postgres /usr/lib/postgresql/16/bin/initdb -D /var/lib/postgresql/16/main
-              cp /var/lib/postgresql/16/main/*.conf /etc/postgresql/16/main/
-              sed -i "s|^#data_directory.*|data_directory = '/var/lib/postgresql/16/main'|" /etc/postgresql/16/main/postgresql.conf
-              sed -i "s|^#listen_addresses.*|listen_addresses = 'localhost'|" /etc/postgresql/16/main/postgresql.conf
-              systemctl daemon-reload
-              systemctl start postgresql@16-main || { echo "❌ Failed to start PostgreSQL"; journalctl -u postgresql@16-main -n 20; exit 1; }
-              systemctl enable postgresql@16-main
-              echo "✅ PostgreSQL cluster initialized."
-            else
-              echo "PostgreSQL cluster already exists."
-              systemctl restart postgresql@16-main || systemctl start postgresql@16-main
-            fi
-
-            # Verify PostgreSQL is running
-            if systemctl is-active postgresql@16-main >/dev/null; then
-              echo "✅ PostgreSQL is running."
-            else
-              echo "❌ PostgreSQL failed to start!"
-              journalctl -u postgresql@16-main -n 20
-              exit 1
-            fi
-
-            # 5. Setup PostgreSQL user and database
-            echo "Checking PostgreSQL connection..."
-            if systemctl is-active postgresql@16-main >/dev/null; then
-              echo "✅ PostgreSQL is running."
-            else
-              echo "PostgreSQL is not running. Starting service..."
-              systemctl start postgresql@16-main || { echo "❌ Failed to start PostgreSQL"; exit 1; }
-            fi
-
-            # Ensure sei user and database exist (but don't recreate if they already exist)
-            if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='sei'" | grep -q 1; then
-              echo "Creating sei user..."
-              sudo -u postgres psql -c "CREATE ROLE sei WITH LOGIN PASSWORD 'sei' CREATEDB CREATEROLE SUPERUSER;"
-            else
-              echo "User 'sei' already exists."
-            fi
-
-            if ! sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw sei; then
-              echo "Creating sei database..."
-              sudo -u postgres psql -c "CREATE DATABASE sei OWNER sei;"
-              sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;"
-            else
-              echo "Database 'sei' already exists."
-            fi
-
-            # Configure PostgreSQL authentication if needed
-            PG_HBA_PATH=$(find /etc/postgresql -name "pg_hba.conf" | head -n 1)
-            if [ -f "$PG_HBA_PATH" ]; then
-              # Only update authentication rules if they don't exist
-              if ! grep -q "local.*all.*sei.*md5" "$PG_HBA_PATH"; then
-                echo "Updating PostgreSQL authentication..."
-                echo "local   all   sei   md5" >> "$PG_HBA_PATH"
-                echo "host    all   sei   127.0.0.1/32   md5" >> "$PG_HBA_PATH"
-                echo "host    all   sei   ::1/128   md5" >> "$PG_HBA_PATH"
-                
-                systemctl restart postgresql@16-main
-                echo "✅ PostgreSQL authentication configured."
-              else
-                echo "PostgreSQL authentication already configured."
-              fi
-            else
-              echo "⚠️ Could not find pg_hba.conf, authentication might need manual configuration."
-            fi
-
-            # 6. Setup Nginx
-            cat > /etc/nginx/sites-available/api.seiinstitute.com <<'EOF'
-            server {
-                listen 80;
-                server_name api.seiinstitute.com;
-                
-                # Root directory for static files
-                root /var/www/sei-institute/backend;
-                
-                # Uploads directory with CORS headers
-                location /uploads/ {
-                    alias /var/www/sei-institute/backend/uploads/;
-                    add_header Access-Control-Allow-Origin * always;
-                    add_header Access-Control-Allow-Methods "GET, OPTIONS" always;
-                    add_header Access-Control-Allow-Headers "Origin, X-Requested-With, Content-Type, Accept" always;
-                    expires 30d;
-                    access_log off;
-                    try_files $uri $uri/ =404;
-                }
-                
-                location / {
-                    proxy_pass http://localhost:9000;
-                    proxy_http_version 1.1;
-                    proxy_set_header Upgrade $http_upgrade;
-                    proxy_set_header Connection "upgrade";
-                    proxy_set_header Host $host;
-                    proxy_set_header X-Real-IP $remote_addr;
-                    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                }
-            }
-            EOF
-            rm -f /etc/nginx/sites-enabled/default
-            ln -sf /etc/nginx/sites-available/api.seiinstitute.com /etc/nginx/sites-enabled/
-
-            # Create uploads directory with proper permissions
-            mkdir -p /var/www/sei-institute/backend/uploads
-            chmod -R 755 /var/www/sei-institute/backend/uploads
-
-            # Test and restart Nginx with HTTP-only config first
-            nginx -t && systemctl restart nginx || { echo "❌ Nginx HTTP configuration failed"; nginx -t; exit 1; }
-            echo "✅ Nginx HTTP configured. Will set up SSL after deployment is complete."
-
-            # 7. Setup environment
-            cat > /var/www/sei-institute/backend/.env <<'EOF'
-            PORT=9000
-            DATABASE_URL="postgresql://sei:sei@127.0.0.1:5432/sei?schema=public"
-            CLIENT_ENDPOINT="https://seiinstitute.com"
-            JWT_SECRET="mahatohariomsfadfnasldkjf"
-            NODE_ENV="production"
-            API_URL="https://api.seiinstitute.com"
-            EOF
-            echo "✅ Environment variables set."
-
-            # 8. Install Node.js and PM2
-            if ! command -v node &> /dev/null; then
-              echo "Installing Node.js and PM2..."
-              curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-              apt-get install -y nodejs
-              npm install -g pm2
-              echo "✅ Node.js and PM2 installed."
-            else
-              echo "Node.js already installed."
-              npm install -g pm2 --force
-            fi
-
-            # 9. Prepare for application files
-            echo "Preparing for application deployment..."
+      # Skip initial server setup as it's already done
+      # Just transfer files and deploy application
 
       - name: Transfer Build Files
         if: github.ref == 'refs/heads/main'
         uses: appleboy/scp-action@master
         with:
-          host: 37.27.247.208
-          username: root
-          password: gkjaRhMActfMatPW7nvd
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
           source: 'backend.tar.gz'
           target: '/var/www/sei-institute/backend'
 
-      - name: Finalize Deployment
+      - name: Deploy Application
         if: github.ref == 'refs/heads/main'
         uses: appleboy/ssh-action@master
         with:
-          host: 37.27.247.208
-          username: root
-          password: gkjaRhMActfMatPW7nvd
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          password: ${{ secrets.SERVER_PASSWORD }}
           script: |
+            echo "==== Deploying Backend Application ===="
+
+            # Stop the backend application if it's running
+            pm2 stop backend || true
+            pm2 delete backend || true
+
+            # Extract application files
             cd /var/www/sei-institute/backend
-            echo "Extracting application files..."
             tar -xzf backend.tar.gz
             rm backend.tar.gz
 
-            # Check file structure
-            echo "Checking file structure..."
-            if [ -d "prisma" ] && [ -f "prisma/schema.prisma" ]; then
-              echo "✅ Prisma directory and schema.prisma found."
-              ls -la prisma/
-            else
-              echo "❌ Prisma directory or schema.prisma not found!"
-              ls -la
-              exit 1
-            fi
+            # Create .env file with secure credentials from GitHub secrets
+            cat > /var/www/sei-institute/backend/.env <<EOF
+            PORT=9000
+            DATABASE_URL="postgresql://sei_user:${{ secrets.DB_PASSWORD }}@127.0.0.1:5432/sei_institute?schema=public"
+            CLIENT_ENDPOINT="https://seiinstitute.com"
+            JWT_SECRET="${{ secrets.JWT_SECRET }}"
+            ACCESS_TOKEN_EXPIRES="1d"
+            REFRESH_TOKEN_EXPIRES="7d"
+            NODE_ENV="production"
+            API_URL="https://api.seiinstitute.com"
+            HUGGING_FACE_KEY="${{ secrets.HUGGING_FACE_KEY }}"
+            EOF
 
             # Install dependencies
-            echo "Installing dependencies..."
-            npm install || { echo "❌ npm install failed"; npm install --verbose; exit 1; }
+            npm ci --production || npm install --production
 
             # Generate Prisma client
-            echo "Generating Prisma client..."
-            npx prisma generate || { echo "❌ Prisma generate failed"; cat prisma/schema.prisma; exit 1; }
+            npx prisma generate
 
-            # Handle migrations
-            echo "Handling database migrations..."
+            # Handle database migrations (only applies changes if needed)
             if [ -d "prisma/migrations" ] && [ -n "$(ls -A prisma/migrations)" ]; then
-              echo "Applying migrations safely..."
-              npx prisma migrate deploy || { 
-                echo "⚠️ Migration deploy encountered issues. Attempting to resolve..."
-                # Give the sei user superuser permission temporarily for this operation
-                sudo -u postgres psql -c "ALTER USER sei WITH SUPERUSER;"
-                npx prisma migrate deploy || { echo "❌ Migrate deploy failed"; npx prisma migrate status; exit 1; }
-              }
-              echo "✅ Migrations applied successfully."
-            else
-              echo "No migrations found. Checking schema compatibility..."
-              # Check if we need to create a migration
-              npx prisma migrate status > /dev/null 2>&1 || {
-                echo "Creating initial migration for schema tracking..."
-                sudo -u postgres psql -c "ALTER USER sei WITH SUPERUSER;"
-                npx prisma db push --accept-data-loss-with-warning=false || {
-                  echo "⚠️ Schema push encountered issues - attempting migration instead"
-                  npx prisma migrate dev --name init --create-only || {
-                    echo "❌ Could not create migration"
-                    exit 1
-                  }
-                  npx prisma migrate deploy || { echo "❌ Migrate deploy failed"; exit 1; }
-                }
-              }
+              echo "Applying database migrations..."
+              npx prisma migrate deploy
             fi
 
-            # Verify database connectivity but don't modify schema
-            echo "Verifying database connectivity..."
-            npx prisma db pull --print > /dev/null 2>&1 || {
-              echo "⚠️ Database connectivity check failed!"
-              exit 1
-            }
-            echo "✅ Database connectivity verified."
-
-            # Run seed if specifically requested or only on fresh database
-            if [ -f ".seed_required" ] || [ -f "prisma/seed.js" ] || [ -f "prisma/seed.ts" ]; then
-              if [ -f ".seed_required" ]; then
-                echo "Seed explicitly requested. Running database seeding..."
-                rm -f .seed_required
-              else
-                # Check if the database is empty
-                TABLES_COUNT=$(sudo -u postgres psql -d sei -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'")
-                if [ "$TABLES_COUNT" -le "1" ]; then
-                  echo "Fresh database detected. Running seeding..."
-                else
-                  echo "Database already contains data. Skipping seed."
-                  # Jump to the start command
-                  echo "✅ Using existing database data."
-                  # Create a skip flag
-                  touch .seed_skipped
-                fi
-              fi
-              
-              # Only proceed with seeding if we haven't decided to skip
-              if [ ! -f ".seed_skipped" ]; then
-                if grep -q "\"prisma\": {" package.json && grep -q "\"seed\":" package.json; then
-                  echo "Running seed command from package.json..."
-                  npx prisma db seed || { echo "❌ Seeding failed"; exit 1; }
-                else
-                  echo "Executing seed file directly..."
-                  if [ -f "prisma/seed.js" ]; then
-                    node prisma/seed.js || { echo "❌ Seed.js failed"; exit 1; }
-                  else
-                    npm install ts-node --no-save
-                    npx ts-node prisma/seed.ts || { echo "❌ Seed.ts failed"; exit 1; }
-                  fi
-                fi
-                echo "✅ Database seeded."
-              else
-                # Remove the skip flag
-                rm -f .seed_skipped
-              fi
-            else
-              echo "⚠️ No seed file found. Database is not seeded."
-            fi
-
-            # Start with PM2
-            echo "Starting application with PM2..."
-            pm2 describe backend > /dev/null 2>&1
-            if [ $? -eq 0 ]; then
-              pm2 restart backend
-            else
-              pm2 start npm --name backend -- start
-            fi
+            # Start the application with PM2
+            pm2 start npm --name backend -- start
             pm2 save
 
             # Verify application is running
-            echo "Verifying application is running..."
             sleep 5
             if pm2 show backend | grep -q "online"; then
-              echo "✅ Application is running."
+              echo "✅ Backend application is running successfully."
             else
-              echo "❌ Application failed to start!"
+              echo "⚠️ Backend application failed to start!"
               pm2 logs backend --lines 20
               exit 1
             fi
 
-            # After application is running, set up SSL certificates
-            # Install Certbot if not already installed
-            if ! command -v certbot &> /dev/null; then
-              echo "Installing Certbot..."
-              apt-get update
-              apt-get install -y certbot python3-certbot-nginx
-            fi
-
-            # Obtain SSL certificate (non-interactive)
-            echo "Obtaining SSL certificate for api.seiinstitute.com..."
-            certbot --nginx -d api.seiinstitute.com --non-interactive --agree-tos --email admin@seiinstitute.com || {
-              echo "⚠️ Failed to obtain SSL certificate. Will continue with HTTP only."
-            }
-
-            # Final check
             echo "==== Backend Deployment Complete ===="
-            echo "Try accessing https://api.seiinstitute.com/api/v1/admin/carousels or http://api.seiinstitute.com/api/v1/admin/carousels"
