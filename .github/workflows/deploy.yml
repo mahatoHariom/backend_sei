@@ -171,26 +171,13 @@ jobs:
                     proxy_set_header Host $host;
                     proxy_set_header X-Real-IP $remote_addr;
                     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-                    proxy_set_header X-Forwarded-Proto $scheme;
                 }
             }
             EOF
             rm -f /etc/nginx/sites-enabled/default
             ln -sf /etc/nginx/sites-available/api.seiinstitute.com /etc/nginx/sites-enabled/
-
-            # Install Certbot and setup SSL if not already installed
-            if ! command -v certbot &> /dev/null; then
-              apt-get update
-              apt-get install -y certbot python3-certbot-nginx
-            fi
-
-            # Request SSL certificate for api.seiinstitute.com
-            if [ ! -d "/etc/letsencrypt/live/api.seiinstitute.com" ]; then
-              certbot --nginx -d api.seiinstitute.com --non-interactive --agree-tos --email admin@seiinstitute.com || true
-            fi
-
             nginx -t && systemctl restart nginx || { echo "❌ Nginx configuration failed"; nginx -t; exit 1; }
-            echo "✅ Nginx configured with SSL."
+            echo "✅ Nginx configured."
 
             # 7. Setup environment
             cat > /var/www/sei-institute/backend/.env <<'EOF'
