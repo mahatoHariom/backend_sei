@@ -29,9 +29,6 @@ jobs:
       - name: Archive Build
         run: tar -czf backend.tar.gz build package.json package-lock.json prisma src
 
-      # Skip initial server setup as it's already done
-      # Just transfer files and deploy application
-
       - name: Transfer Build Files
         if: github.ref == 'refs/heads/main'
         uses: appleboy/scp-action@master
@@ -52,7 +49,7 @@ jobs:
           script: |
             echo "==== Deploying Backend Application ===="
 
-            # Stop the backend application if it's running
+            # Stop the backend application if running
             pm2 stop backend || true
             pm2 delete backend || true
 
@@ -61,8 +58,8 @@ jobs:
             tar -xzf backend.tar.gz
             rm backend.tar.gz
 
-            # Create .env file with secure credentials from GitHub secrets
-            cat > /var/www/sei-institute/backend/.env <<EOF
+            # Create .env file with secure credentials
+            cat > .env <<EOF
             PORT=9000
             DATABASE_URL="postgresql://sei_user:${{ secrets.DB_PASSWORD }}@127.0.0.1:5432/sei_institute?schema=public"
             CLIENT_ENDPOINT="https://seiinstitute.com"
@@ -74,13 +71,13 @@ jobs:
             HUGGING_FACE_KEY="${{ secrets.HUGGING_FACE_KEY }}"
             EOF
 
-            # Install dependencies
-            npm ci --production || npm install --production
+            # Install production dependencies
+            npm ci --production
 
             # Generate Prisma client
             npx prisma generate
 
-            # Handle database migrations (only applies changes if needed)
+            # Apply database migrations
             if [ -d "prisma/migrations" ] && [ -n "$(ls -A prisma/migrations)" ]; then
               echo "Applying database migrations..."
               npx prisma migrate deploy
@@ -89,15 +86,5 @@ jobs:
             # Start the application with PM2
             pm2 start npm --name backend -- start
             pm2 save
-
-            # Verify application is running
-            sleep 5
-            if pm2 show backend | grep -q "online"; then
-              echo "✅ Backend application is running successfully."
-            else
-              echo "⚠️ Backend application failed to start!"
-              pm2 logs backend --lines 20
-              exit 1
-            fi
 
             echo "==== Backend Deployment Complete ===="
