@@ -10,6 +10,7 @@ import multer from 'fastify-multer'
 import formBody from '@fastify/formbody'
 import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
+
 import path from 'path'
 import CheckAdminRole from './app/middlewares/check-admin'
 
