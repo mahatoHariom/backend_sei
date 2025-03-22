@@ -21,7 +21,6 @@ const createApp = async (): Promise<FastifyInstance> => {
   // Load environment variables
 
   loadEnvironment()
-
   // Initialize Fastify with logger
   const app = fastify({
     logger: true,
