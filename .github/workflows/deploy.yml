@@ -21,11 +21,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate .env file from secrets
+      - name: Generate .env file
         run: |
-          # Create .env file from secrets
-          echo "DATABASE_URL=postgresql://sei_user:sei@37.27.247.208:5432/sei_institute?schema=public" > .env.production
-          echo "JWT_SECRET=${{ secrets.BACKEND_JWT_SECRET || 'your-super-secret-jwt-key' }}" >> .env.production
+          # Create .env file
+          echo "DATABASE_URL=postgresql://sei_user:sei@localhost:5432/sei_institute?schema=public" > .env.production
+          echo "JWT_SECRET=your-super-secret-jwt-key" >> .env.production
           echo "PORT=3333" >> .env.production
           echo "NODE_ENV=production" >> .env.production
           echo "FRONTEND_URL=https://seiinstitute.com" >> .env.production
@@ -34,28 +34,104 @@ jobs:
       - name: Build application
         run: npm run build
 
-      - name: Install sshpass
-        run: sudo apt-get install -y sshpass
+      - name: Check for node-llama-cpp dependency
+        run: |
+          # Remove node-llama-cpp dependency if present
+          if grep -q "node-llama-cpp" package.json; then
+            echo "Removing node-llama-cpp dependency for deployment"
+            sed -i 's/"node-llama-cpp": "[^"]*",\?//g' package.json
+          fi
 
-      - name: Setup SSH directory
+      - name: Install expect
+        run: sudo apt-get update && sudo apt-get install -y expect
+
+      - name: Setup SSH config
         run: |
           mkdir -p ~/.ssh
-          echo "StrictHostKeyChecking no" > ~/.ssh/config
+          echo "Host backend-server" > ~/.ssh/config
+          echo "  HostName 37.27.247.208" >> ~/.ssh/config
+          echo "  User root" >> ~/.ssh/config
+          echo "  StrictHostKeyChecking no" >> ~/.ssh/config
           chmod 600 ~/.ssh/config
 
-      - name: Deploy to server
-        env:
-          SERVER_PASSWORD: gkjaRhMActfMatPW7nvd
+      - name: Create deployment scripts
         run: |
-          # Copy built files directly to the server
-          sshpass -p "$SERVER_PASSWORD" rsync -avz --delete ./build/ ./package.json ./package-lock.json ./prisma/ ./.env.production root@37.27.247.208:/opt/sei-institute/backend/
+          # Create directory script
+          echo '#!/usr/bin/expect -f
+          set timeout 30
+          spawn ssh root@37.27.247.208 "mkdir -p /opt/sei-institute/backend"
+          expect "password:"
+          send "gkjaRhMActfMatPW7nvd\r"
+          expect eof' > create_dir.exp
 
-          # Restart the PM2 process - ensure necessary build tools are installed
-          sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 'cd /opt/sei-institute/backend && npm ci --production --no-optional --omit=dev && npx prisma generate && mv .env.production .env && pm2 restart backend || pm2 start build/index.js --name backend && pm2 save'
+          # Create rsync script
+          echo '#!/usr/bin/expect -f
+          set timeout 120
+          spawn rsync -avz --delete ./build/ ./package.json ./package-lock.json ./prisma/ ./.env.production root@37.27.247.208:/opt/sei-institute/backend/
+          expect "password:"
+          send "gkjaRhMActfMatPW7nvd\r"
+          expect eof' > rsync_files.exp
+
+          # Create deployment script
+          echo '#!/usr/bin/expect -f
+          set timeout 300
+          spawn ssh root@37.27.247.208 "cd /opt/sei-institute/backend && if grep -q \"node-llama-cpp\" package.json; then sed -i '\''s/\"node-llama-cpp\": \"[^\"]*\",\?//g'\'' package.json; fi && npm ci --production --no-optional --omit=dev && npx prisma generate && mv .env.production .env && pm2 delete backend || true && PORT=3333 pm2 start build/index.js --name backend && pm2 save"
+          expect "password:"
+          send "gkjaRhMActfMatPW7nvd\r"
+          expect eof' > deploy_app.exp
+
+          # Create Nginx config file
+          echo 'server {
+              listen 80;
+              listen [::]:80;
+              server_name api.seiinstitute.com;
+              
+              location / {
+                  proxy_pass http://localhost:3333;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host $host;
+                  proxy_cache_bypass $http_upgrade;
+              }
+          }' > backend_nginx.conf
+
+          # Create nginx deploy script
+          echo '#!/usr/bin/expect -f
+          set timeout 30
+          # Copy Nginx config file
+          spawn scp backend_nginx.conf root@37.27.247.208:/etc/nginx/sites-available/backend
+          expect "password:"
+          send "gkjaRhMActfMatPW7nvd\r"
+          expect eof
+
+          # Enable site and reload
+          spawn ssh root@37.27.247.208 "ln -sf /etc/nginx/sites-available/backend /etc/nginx/sites-enabled/ && nginx -t && systemctl reload nginx"
+          expect "password:"
+          send "gkjaRhMActfMatPW7nvd\r"
+          expect eof' > setup_nginx.exp
+
+          # Create verification script
+          echo '#!/usr/bin/expect -f
+          set timeout 30
+          spawn ssh root@37.27.247.208 "pm2 status backend && curl -s http://localhost:3333 && echo '\''Backend is running correctly'\''"
+          expect "password:"
+          send "gkjaRhMActfMatPW7nvd\r"
+          expect eof' > verify.exp
+
+          # Make all scripts executable
+          chmod +x *.exp
+
+      - name: Deploy to server
+        run: |
+          ./create_dir.exp
+          ./rsync_files.exp
+          ./deploy_app.exp
+
+      - name: Configure Nginx
+        run: |
+          ./setup_nginx.exp
 
       - name: Verify deployment
-        env:
-          SERVER_PASSWORD: gkjaRhMActfMatPW7nvd
         run: |
-          # Check if service is running with PM2
-          sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 'pm2 status backend'
+          ./verify.exp
