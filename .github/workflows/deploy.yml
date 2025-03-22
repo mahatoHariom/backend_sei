@@ -59,7 +59,7 @@ jobs:
           # Create directory script
           echo '#!/usr/bin/expect -f
           set timeout 30
-          spawn ssh root@37.27.247.208 "mkdir -p /opt/sei-institute/backend"
+          spawn ssh root@37.27.247.208 "mkdir -p /var/www/sei-institute/backend"
           expect "password:"
           send "gkjaRhMActfMatPW7nvd\r"
           expect eof' > create_dir.exp
@@ -67,7 +67,7 @@ jobs:
           # Create rsync script
           echo '#!/usr/bin/expect -f
           set timeout 120
-          spawn rsync -avz --delete ./build/ ./package.json ./package-lock.json ./prisma/ ./.env.production root@37.27.247.208:/opt/sei-institute/backend/
+          spawn rsync -avz --delete ./build/ ./package.json ./package-lock.json ./prisma/ ./.env.production root@37.27.247.208:/var/www/sei-institute/backend/
           expect "password:"
           send "gkjaRhMActfMatPW7nvd\r"
           expect eof' > rsync_files.exp
@@ -75,7 +75,7 @@ jobs:
           # Create deployment script
           echo '#!/usr/bin/expect -f
           set timeout 300
-          spawn ssh root@37.27.247.208 "cd /opt/sei-institute/backend && if grep -q \"node-llama-cpp\" package.json; then sed -i '\''s/\"node-llama-cpp\": \"[^\"]*\",\?//g'\'' package.json; fi && npm ci --production --no-optional --omit=dev && npx prisma generate && mv .env.production .env && pm2 delete backend || true && PORT=3333 pm2 start build/index.js --name backend && pm2 save"
+          spawn ssh root@37.27.247.208 "cd /var/www/sei-institute/backend && if grep -q \"node-llama-cpp\" package.json; then sed -i '\''s/\"node-llama-cpp\": \"[^\"]*\",\?//g'\'' package.json; fi && npm ci --production --no-optional --omit=dev && npx prisma generate && mv .env.production .env && pm2 delete backend || true && PORT=3333 pm2 start build/index.js --name backend && pm2 save"
           expect "password:"
           send "gkjaRhMActfMatPW7nvd\r"
           expect eof' > deploy_app.exp
