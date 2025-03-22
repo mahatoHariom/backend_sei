@@ -51,8 +51,8 @@ jobs:
       - name: Create .env file from secrets
         run: |
           cat > .env << EOL
-          PORT=${{ secrets.BACKEND_PORT }}
-          DATABASE_URL=postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@${{ secrets.DB_HOST }}:${{ secrets.DB_PORT }}/${{ secrets.DB_NAME }}
+          PORT=3001
+          DATABASE_URL=postgresql://sei:${{ secrets.DB_PASSWORD }}@37.27.247.208:5432/sei_institute?schema=public
           CLIENT_ENDPOINT=${{ secrets.CLIENT_ENDPOINT }}
           JWT_SECRET=${{ secrets.JWT_SECRET }}
           ACCESS_TOKEN_EXPIRES=${{ secrets.ACCESS_TOKEN_EXPIRES }}
@@ -70,6 +70,8 @@ jobs:
           mkdir -p deploy
           cp -r build deploy/
           cp -r prisma deploy/
+          mkdir -p deploy/uploads
+          mkdir -p deploy/uploads/images
           cp package.json deploy/
           cp package-lock.json deploy/
           cp .env deploy/
@@ -78,19 +80,24 @@ jobs:
       - name: Deploy to production server
         uses: appleboy/scp-action@master
         with:
-          host: 37.27.247.208
-          username: root
-          password: gkjaRhMActfMatPW7nvd
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
           source: 'backend-deploy.tar.gz'
           target: '/tmp'
 
       - name: Extract and setup on server
         uses: appleboy/ssh-action@master
         with:
-          host: 37.27.247.208
-          username: root
-          password: gkjaRhMActfMatPW7nvd
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
           script: |
+            # Kill any existing processes on port 3001
+            if lsof -i :3001 -t; then
+              kill -9 $(lsof -i :3001 -t) || true
+            fi
+
             # Create directory if not exists
             mkdir -p /var/www/sei-institute/backend
 
@@ -104,20 +111,32 @@ jobs:
             # Extract deployment package
             tar -xzf /tmp/backend-deploy.tar.gz -C /var/www/sei-institute/backend
 
+            # Ensure uploads directory exists with proper permissions
+            mkdir -p /var/www/sei-institute/backend/uploads
+            mkdir -p /var/www/sei-institute/backend/uploads/images
+            chmod -R 755 /var/www/sei-institute/backend/uploads
+
             # Install production dependencies
             cd /var/www/sei-institute/backend
             npm ci --production
 
             # Run database migrations (without recreating the database)
             # This applies schema changes but doesn't drop existing data
-            npm run prisma:migrate:deploy
+            npx prisma migrate deploy
 
-            # Setup or restart PM2
-            if pm2 list | grep -q "backend-app"; then
-              pm2 restart backend-app
+            # Delete any existing backend app in PM2
+            pm2 delete backend-app || true
+
+            # Start a fresh instance
+            pm2 start build/server.js --name backend-app
+            pm2 save
+
+            # Verify server is running
+            echo "Verifying backend server is running..."
+            if lsof -i :3001 | grep LISTEN; then
+              echo "Backend server is running successfully on port 3001"
             else
-              pm2 start build/server.js --name backend-app
-              pm2 save
+              echo "WARNING: Backend server failed to start on port 3001"
             fi
 
             # Cleanup
