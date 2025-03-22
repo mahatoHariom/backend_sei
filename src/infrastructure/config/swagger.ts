@@ -61,7 +61,7 @@ export const swaggerOptions = {
     },
     servers: [
       {
-        url: 'http://api.seiinstitute.com'
+        url: 'https://api.seiinstitute.com'
       }
     ],
     components: {
