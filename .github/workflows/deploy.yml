@@ -134,25 +134,10 @@ jobs:
                 listen 80;
                 server_name api.seiinstitute.com;
                 
-                # Redirect HTTP to HTTPS
-                location / {
-                    return 301 https://$host$request_uri;
-                }
-            }
-
-            server {
-                listen 443 ssl;
-                server_name api.seiinstitute.com;
+                # Root directory for static files
+                root /var/www/sei-institute/backend;
                 
-                # SSL configuration
-                ssl_certificate /etc/letsencrypt/live/api.seiinstitute.com/fullchain.pem;
-                ssl_certificate_key /etc/letsencrypt/live/api.seiinstitute.com/privkey.pem;
-                ssl_protocols TLSv1.2 TLSv1.3;
-                ssl_prefer_server_ciphers off;
-                ssl_session_timeout 1d;
-                ssl_session_cache shared:SSL:10m;
-                
-                # Add CORS headers for image requests
+                # Uploads directory with CORS headers
                 location /uploads/ {
                     alias /var/www/sei-institute/backend/uploads/;
                     add_header Access-Control-Allow-Origin * always;
@@ -176,8 +161,14 @@ jobs:
             EOF
             rm -f /etc/nginx/sites-enabled/default
             ln -sf /etc/nginx/sites-available/api.seiinstitute.com /etc/nginx/sites-enabled/
-            nginx -t && systemctl restart nginx || { echo "❌ Nginx configuration failed"; nginx -t; exit 1; }
-            echo "✅ Nginx configured."
+
+            # Create uploads directory with proper permissions
+            mkdir -p /var/www/sei-institute/backend/uploads
+            chmod -R 755 /var/www/sei-institute/backend/uploads
+
+            # Test and restart Nginx with HTTP-only config first
+            nginx -t && systemctl restart nginx || { echo "❌ Nginx HTTP configuration failed"; nginx -t; exit 1; }
+            echo "✅ Nginx HTTP configured. Will set up SSL after deployment is complete."
 
             # 7. Setup environment
             cat > /var/www/sei-institute/backend/.env <<'EOF'
@@ -346,5 +337,20 @@ jobs:
               exit 1
             fi
 
+            # After application is running, set up SSL certificates
+            # Install Certbot if not already installed
+            if ! command -v certbot &> /dev/null; then
+              echo "Installing Certbot..."
+              apt-get update
+              apt-get install -y certbot python3-certbot-nginx
+            fi
+
+            # Obtain SSL certificate (non-interactive)
+            echo "Obtaining SSL certificate for api.seiinstitute.com..."
+            certbot --nginx -d api.seiinstitute.com --non-interactive --agree-tos --email admin@seiinstitute.com || {
+              echo "⚠️ Failed to obtain SSL certificate. Will continue with HTTP only."
+            }
+
+            # Final check
             echo "==== Backend Deployment Complete ===="
-            echo "Try accessing http://api.seiinstitute.com/api/v1/admin/carousels"
+            echo "Try accessing https://api.seiinstitute.com/api/v1/admin/carousels or http://api.seiinstitute.com/api/v1/admin/carousels"
