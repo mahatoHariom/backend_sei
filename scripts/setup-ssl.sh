@@ -90,6 +90,22 @@ server {
     ssl_session_timeout 10m;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     
+    # Serve static files directly from Nginx for better performance
+    location ~* \.(jpg|jpeg|png|gif|ico|svg|webp|css|js|woff|woff2|ttf|eot|json)$ {
+        root /var/www/sei-institute/frontend/public;
+        expires 30d;
+        add_header Cache-Control "public, max-age=2592000";
+        try_files \$uri @proxy;
+    }
+    
+    # For Next.js static files
+    location /_next/static {
+        alias /var/www/sei-institute/frontend/.next/static;
+        expires 365d;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+    }
+    
+    # Forward all other requests to the Next.js application
     location / {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
