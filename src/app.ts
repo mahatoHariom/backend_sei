@@ -38,8 +38,6 @@ const createApp = async (): Promise<FastifyInstance> => {
     // Register all plugins
     await registerPlugins(app)
 
-    
-
     // Register all middlewares
     await registerMiddlewares(app)
 
@@ -51,7 +49,8 @@ const createApp = async (): Promise<FastifyInstance> => {
       prefix: '/uploads', // URL prefix for accessing files
       decorateReply: true,
       setHeaders: (res) => {
-        res.setHeader('Access-Control-Allow-Origin', '*')
+        res.setHeader('Access-Control-Allow-Origin', 'https://seiinstitute.com')
+        res.setHeader('Access-Control-Allow-Credentials', 'true')
         res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
       }
     })

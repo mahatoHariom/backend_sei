@@ -14,7 +14,9 @@ export async function registerPlugins(app: FastifyInstance) {
   // Security plugins
   await app.register(cors, {
     credentials: true,
-    origin: ['*']
+    origin: ['https://seiinstitute.com', 'http://localhost:3000'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
   })
 
   await app.register(helmet)
