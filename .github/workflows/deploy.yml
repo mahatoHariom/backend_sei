@@ -42,96 +42,50 @@ jobs:
             sed -i 's/"node-llama-cpp": "[^"]*",\?//g' package.json
           fi
 
-      - name: Install expect
-        run: sudo apt-get update && sudo apt-get install -y expect
+      - name: Install sshpass
+        run: sudo apt-get update && sudo apt-get install -y sshpass
 
-      - name: Setup SSH config
+      - name: Create Nginx config file
         run: |
-          mkdir -p ~/.ssh
-          echo "Host backend-server" > ~/.ssh/config
-          echo "  HostName 37.27.247.208" >> ~/.ssh/config
-          echo "  User root" >> ~/.ssh/config
-          echo "  StrictHostKeyChecking no" >> ~/.ssh/config
-          chmod 600 ~/.ssh/config
-
-      - name: Create deployment scripts
-        run: |
-          # Create directory script
-          echo '#!/usr/bin/expect -f
-          set timeout 30
-          spawn ssh root@37.27.247.208 "mkdir -p /var/www/sei-institute/backend"
-          expect "password:"
-          send "gkjaRhMActfMatPW7nvd\r"
-          expect eof' > create_dir.exp
-
-          # Create rsync script
-          echo '#!/usr/bin/expect -f
-          set timeout 120
-          spawn rsync -avz --delete ./build/ ./package.json ./package-lock.json ./prisma/ ./.env.production root@37.27.247.208:/var/www/sei-institute/backend/
-          expect "password:"
-          send "gkjaRhMActfMatPW7nvd\r"
-          expect eof' > rsync_files.exp
-
-          # Create deployment script
-          echo '#!/usr/bin/expect -f
-          set timeout 300
-          spawn ssh root@37.27.247.208 "cd /var/www/sei-institute/backend && if grep -q \"node-llama-cpp\" package.json; then sed -i '\''s/\"node-llama-cpp\": \"[^\"]*\",\?//g'\'' package.json; fi && npm ci --production --no-optional --omit=dev && npx prisma generate && mv .env.production .env && pm2 delete backend || true && PORT=3333 pm2 start build/index.js --name backend && pm2 save"
-          expect "password:"
-          send "gkjaRhMActfMatPW7nvd\r"
-          expect eof' > deploy_app.exp
-
           # Create Nginx config file
-          echo 'server {
-              listen 80;
-              listen [::]:80;
-              server_name api.seiinstitute.com;
-              
-              location / {
-                  proxy_pass http://localhost:3333;
-                  proxy_http_version 1.1;
-                  proxy_set_header Upgrade $http_upgrade;
-                  proxy_set_header Connection "upgrade";
-                  proxy_set_header Host $host;
-                  proxy_cache_bypass $http_upgrade;
-              }
-          }' > backend_nginx.conf
-
-          # Create nginx deploy script
-          echo '#!/usr/bin/expect -f
-          set timeout 30
-          # Copy Nginx config file
-          spawn scp backend_nginx.conf root@37.27.247.208:/etc/nginx/sites-available/backend
-          expect "password:"
-          send "gkjaRhMActfMatPW7nvd\r"
-          expect eof
-
-          # Enable site and reload
-          spawn ssh root@37.27.247.208 "ln -sf /etc/nginx/sites-available/backend /etc/nginx/sites-enabled/ && nginx -t && systemctl reload nginx"
-          expect "password:"
-          send "gkjaRhMActfMatPW7nvd\r"
-          expect eof' > setup_nginx.exp
-
-          # Create verification script
-          echo '#!/usr/bin/expect -f
-          set timeout 30
-          spawn ssh root@37.27.247.208 "pm2 status backend && curl -s http://localhost:3333 && echo '\''Backend is running correctly'\''"
-          expect "password:"
-          send "gkjaRhMActfMatPW7nvd\r"
-          expect eof' > verify.exp
-
-          # Make all scripts executable
-          chmod +x *.exp
+          echo "server {" > backend_nginx.conf
+          echo "    listen 80;" >> backend_nginx.conf
+          echo "    listen [::]:80;" >> backend_nginx.conf
+          echo "    server_name api.seiinstitute.com;" >> backend_nginx.conf
+          echo "" >> backend_nginx.conf
+          echo "    location / {" >> backend_nginx.conf
+          echo "        proxy_pass http://localhost:3333;" >> backend_nginx.conf
+          echo "        proxy_http_version 1.1;" >> backend_nginx.conf
+          echo "        proxy_set_header Upgrade \$http_upgrade;" >> backend_nginx.conf
+          echo "        proxy_set_header Connection \"upgrade\";" >> backend_nginx.conf
+          echo "        proxy_set_header Host \$host;" >> backend_nginx.conf
+          echo "        proxy_cache_bypass \$http_upgrade;" >> backend_nginx.conf
+          echo "    }" >> backend_nginx.conf
+          echo "}" >> backend_nginx.conf
 
       - name: Deploy to server
         run: |
-          ./create_dir.exp
-          ./rsync_files.exp
-          ./deploy_app.exp
+          # Create application directory
+          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "mkdir -p /var/www/sei-institute/backend"
+
+          # Copy built files directly to the server
+          sshpass -p "gkjaRhMActfMatPW7nvd" rsync -avz -e "ssh -o StrictHostKeyChecking=no" --delete ./build/ ./package.json ./package-lock.json ./prisma/ ./.env.production root@37.27.247.208:/var/www/sei-institute/backend/
+
+          # Remove any existing node-llama-cpp dependency on the server
+          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "cd /var/www/sei-institute/backend && if grep -q \"node-llama-cpp\" package.json; then sed -i 's/\"node-llama-cpp\": \"[^\"]*\",\?//g' package.json; fi"
+
+          # Install dependencies and start application
+          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "cd /var/www/sei-institute/backend && npm ci --production --no-optional --omit=dev && npx prisma generate && mv .env.production .env && pm2 delete backend || true && PORT=3333 pm2 start build/index.js --name backend && pm2 save"
 
       - name: Configure Nginx
         run: |
-          ./setup_nginx.exp
+          # Copy Nginx config file
+          sshpass -p "gkjaRhMActfMatPW7nvd" scp -o StrictHostKeyChecking=no backend_nginx.conf root@37.27.247.208:/etc/nginx/sites-available/backend
+
+          # Enable site and reload Nginx
+          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "ln -sf /etc/nginx/sites-available/backend /etc/nginx/sites-enabled/ && nginx -t && systemctl reload nginx"
 
       - name: Verify deployment
         run: |
-          ./verify.exp
+          # Check application status
+          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "pm2 status backend && curl -s http://localhost:3333 && echo 'Backend is running correctly'"
