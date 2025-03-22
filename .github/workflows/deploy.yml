@@ -14,7 +14,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: package-lock.json
 
@@ -24,13 +24,12 @@ jobs:
       - name: Generate .env file from secrets
         run: |
           # Create .env file from secrets
-          echo "DATABASE_URL=${{ secrets.BACKEND_DATABASE_URL }}" > .env.production
-          echo "JWT_SECRET=${{ secrets.BACKEND_JWT_SECRET }}" >> .env.production
-          echo "PORT=${{ secrets.BACKEND_PORT || '3333' }}" >> .env.production
+          echo "DATABASE_URL=postgresql://sei_user:sei@37.27.247.208:5432/sei_institute?schema=public" > .env.production
+          echo "JWT_SECRET=${{ secrets.BACKEND_JWT_SECRET || 'your-super-secret-jwt-key' }}" >> .env.production
+          echo "PORT=3333" >> .env.production
           echo "NODE_ENV=production" >> .env.production
           # Add other environment variables as needed
-          echo "API_URL=${{ secrets.BACKEND_API_URL }}" >> .env.production
-          echo "FRONTEND_URL=${{ secrets.FRONTEND_URL }}" >> .env.production
+          echo "FRONTEND_URL=https://sei-institute.com" >> .env.production
 
           # Display .env file content (without sensitive data)
           echo "Generated .env.production file (with sensitive data masked):"
@@ -65,14 +64,18 @@ jobs:
           cat > backend.service << 'EOL'
           [Unit]
           Description=SEI Institute Backend Service
-          After=network.target
+          After=network.target postgresql.service
 
           [Service]
           User=root
           WorkingDirectory=/opt/sei-institute/backend
-          ExecStart=/usr/bin/npm start
+          ExecStart=/usr/bin/node /opt/sei-institute/backend/build/index.js
           Restart=always
+          RestartSec=10
           Environment=NODE_ENV=production
+          StandardOutput=journal
+          StandardError=journal
+          SyslogIdentifier=backend
 
           [Install]
           WantedBy=multi-user.target
@@ -91,10 +94,8 @@ jobs:
             rm -rf /opt/sei-institute/backend/* && 
             cp -r /tmp/backend-deploy/* /opt/sei-institute/backend/ && 
             cp /tmp/backend-deploy/.env.production /opt/sei-institute/backend/.env && 
-            if [ ! -f /etc/systemd/system/backend.service ]; then 
-              mv /tmp/backend.service /etc/systemd/system/backend.service
-              systemctl daemon-reload
-            fi && 
+            mv /tmp/backend.service /etc/systemd/system/backend.service && 
+            systemctl daemon-reload && 
             systemctl enable backend && 
             systemctl start backend && 
             rm -rf /tmp/backend-deploy
@@ -108,6 +109,6 @@ jobs:
           SERVER_PASSWORD: gkjaRhMActfMatPW7nvd
         run: |
           # Wait for service to start
-          sleep 5
+          sleep 10
           # Check if service is running
           sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 'systemctl status backend'
