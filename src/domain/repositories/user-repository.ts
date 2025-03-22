@@ -18,102 +18,62 @@ export class PrismaUserRepository implements IUserRepository {
     })
   }
 
-  async completeProfile(data: CreateUserDetailInput, userId: string): Promise<UserWithDetails> {
-    let profilePicId: string | null = null
+  async completeProfile(data: CreateUserDetailInput, userId: string): Promise<User> {
+    const { profilePic, ...profileData } = data
+    let profilePicUrl = undefined
 
-    if (data.profilePic) {
-      const profilePic = await this.prisma.profilePic.create({
-        data: {
-          url: data.profilePic.url,
-          publicId: data.profilePic.public_id
-        }
-      })
-      profilePicId = profilePic.id
+    // If a profile pic is provided, save the URL
+    if (profilePic) {
+      profilePicUrl = profilePic.url
     }
 
-    // Remove profilePic from data before spreading
-    const { profilePic, ...userDetailData } = data
-
-    await this.prisma.userDetail.upsert({
-      where: { userId },
-      create: {
-        ...userDetailData,
-        userId,
-        profilePicId
-      },
-      update: {
-        ...userDetailData,
-        profilePicId
-      }
-    })
-
+    // Update user with all profile data
     return this.prisma.user.update({
       where: { id: userId },
-      include: { userDetail: true },
-      data: { isVerified: true }
+      data: {
+        ...profileData,
+        profilePicUrl,
+        isVerified: true
+      }
     })
   }
 
-  async updateUserProfile(userId: string, data: { fullName?: string; email?: string }): Promise<User> {
+  async updateUserProfile(
+    userId: string,
+    data: {
+      fullName?: string
+      email?: string
+      phoneNumber?: string
+      address?: string
+      motherName?: string
+      fatherName?: string
+      parentContact?: string
+      schoolCollegeName?: string
+    }
+  ): Promise<User> {
     return await this.prisma.user.update({
       where: { id: userId },
       data: {
         fullName: data.fullName,
-        email: data.email
-      },
-      include: { userDetail: true }
+        email: data.email,
+        phoneNumber: data.phoneNumber,
+        address: data.address,
+        motherName: data.motherName,
+        fatherName: data.fatherName,
+        parentContact: data.parentContact,
+        schoolCollegeName: data.schoolCollegeName
+      }
     })
   }
 
-  async updateProfilePic(userId: string, profilePicData: { url: string; publicId: string }): Promise<UserDetail> {
-    // Fetch the user's detail
-    const userDetail = await this.prisma.userDetail.findUnique({
-      where: { userId },
-      include: { profilePic: true } // Include the profilePic relationship
+  async updateProfilePic(userId: string, profilePicUrl: string): Promise<User> {
+    // Directly update the User model with the profile pic URL
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        profilePicUrl
+      }
     })
-
-    if (!userDetail) {
-      throw new Error('User detail not found')
-    }
-
-    if (userDetail.profilePic) {
-      // Update the existing profile picture
-      await this.prisma.profilePic.update({
-        where: { id: userDetail.profilePic.id },
-        data: {
-          url: profilePicData.url,
-          publicId: profilePicData.publicId
-        }
-      })
-    } else {
-      // Create a new profile picture
-      const newProfilePic = await this.prisma.profilePic.create({
-        data: {
-          url: profilePicData.url,
-          publicId: profilePicData.publicId
-        }
-      })
-
-      // Update the UserDetail with the new profilePic ID
-      await this.prisma.userDetail.update({
-        where: { userId },
-        data: {
-          profilePicId: newProfilePic.id
-        }
-      })
-    }
-
-    // Return the updated UserDetail with the profile picture
-    const updatedUserDetail = await this.prisma.userDetail.findUnique({
-      where: { userId },
-      include: { profilePic: true }
-    })
-
-    if (!updatedUserDetail) {
-      throw new Error('User detail not found after update')
-    }
-
-    return updatedUserDetail
   }
 
   async updateUserDetails(userId: string, data: Partial<CreateUserDetailInput>): Promise<UserDetail> {

@@ -2,7 +2,6 @@ import { FastifyInstance } from 'fastify'
 import { TYPES } from '@/types'
 import { AdminController } from '@/app/controllers/admin-controller'
 import {
-  createCarouselSchema,
   createSubjectSchema,
   deleteCarouselParamsSchema,
   deleteContactParamsSchema,
@@ -12,9 +11,9 @@ import {
   editSubjectSchema,
   getAllContactsResponseSchema,
   getAllUsersResponseSchema,
-  getEnrolledUsersResponseSchema,
-  updateCarouselSchema
+  getEnrolledUsersResponseSchema
 } from '@/domain/schemas/admin-schemas'
+import { carouselImageUpload } from '@/infrastructure/config/multer'
 
 export default async function adminRoutes(fastify: FastifyInstance) {
   const adminController = fastify.container.get<AdminController>(TYPES.AdminController)
@@ -38,28 +37,37 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     {
       schema: {
         tags: ['Admin'],
-        body: createCarouselSchema,
+        consumes: ['multipart/form-data'],
         response: {
           201: { type: 'null' }
         }
       },
-      onRequest: [fastify.authenticate, fastify.checkAdmin]
+      onRequest: [fastify.authenticate, fastify.checkAdmin],
+      preHandler: carouselImageUpload.single('carouselImage')
     },
     adminController.createCarousel.bind(adminController)
   )
 
   // Update carousel
-  fastify.put(
-    '/admin/carousels',
+  fastify.put<{ Params: { id: string } }>(
+    '/admin/carousels/:id',
     {
       schema: {
         tags: ['Admin'],
-        body: updateCarouselSchema,
+        consumes: ['multipart/form-data'],
+        params: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          },
+          required: ['id']
+        },
         response: {
           200: { type: 'null' }
         }
       },
-      onRequest: [fastify.authenticate, fastify.checkAdmin]
+      onRequest: [fastify.authenticate, fastify.checkAdmin],
+      preHandler: carouselImageUpload.single('carouselImage')
     },
     adminController.updateCarousel.bind(adminController)
   )
@@ -93,9 +101,9 @@ export default async function adminRoutes(fastify: FastifyInstance) {
               type: 'object',
               properties: {
                 id: { type: 'string' },
-                publicId: { type: 'string' },
-                url: { type: 'string' },
-                createdAt: { type: 'string', format: 'date-time' }
+                imageUrl: { type: 'string' },
+                createdAt: { type: 'string', format: 'date-time' },
+                updatedAt: { type: 'string', format: 'date-time' }
               }
             }
           }

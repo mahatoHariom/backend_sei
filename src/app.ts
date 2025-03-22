@@ -13,14 +13,13 @@ import fastifyStatic from '@fastify/static'
 import path from 'path'
 import CheckAdminRole from './app/middlewares/check-admin'
 
-
 /**
  * Creates and configures the Fastify application
  */
 
 const createApp = async (): Promise<FastifyInstance> => {
   // Load environment variables
-  
+
   loadEnvironment()
 
   // Initialize Fastify with logger
@@ -45,10 +44,16 @@ const createApp = async (): Promise<FastifyInstance> => {
     // Decorate app with DI container
     app.decorate('container', container)
 
-    // app.register(fastifyStatic, {
-    //   root: path.join(__dirname, '../uploads'),
-    //   prefix: '/uploads' // URL prefix for accessing files
-    // })
+    app.register(fastifyStatic, {
+      root: path.join(__dirname, '../uploads'),
+      prefix: '/uploads', // URL prefix for accessing files
+      decorateReply: true,
+      setHeaders: (res) => {
+        res.setHeader('Access-Control-Allow-Origin', '*')
+        res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+      }
+    })
+
     await app.register(formBody)
     app.register(multipart, {
       limits: {

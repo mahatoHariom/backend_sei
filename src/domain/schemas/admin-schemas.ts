@@ -69,14 +69,12 @@ export const getAllContactsResponseSchema = Type.Object({
 })
 
 export const createCarouselSchema = Type.Object({
-  publicId: Type.String(),
-  url: Type.String()
+  imageUrl: Type.String()
 })
 
 export const updateCarouselSchema = Type.Object({
   id: Type.String(),
-  publicId: Type.String(),
-  url: Type.String()
+  imageUrl: Type.String()
 })
 
 export const deleteCarouselParamsSchema = Type.Object({

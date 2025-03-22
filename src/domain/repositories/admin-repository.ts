@@ -9,16 +9,17 @@ import { EnrollmentWithSubjects } from '@/types/enrollment'
 export class PrismaAdminRepository implements IAdminRepository {
   private readonly prisma = PrismaService.getClient()
 
-  async createCarousel({ publicId, url }: { publicId: string; url: string }): Promise<void> {
-    await this.prisma.carousel.create({
-      data: { publicId, url }
+  async createCarousel(data: { imageUrl: string }): Promise<Carousel> {
+    return this.prisma.carousel.create({
+      data
     })
   }
 
-  async updateCarousel({ id, publicId, url }: { id: string; publicId: string; url: string }): Promise<void> {
-    await this.prisma.carousel.update({
+  async updateCarousel(data: { id: string; imageUrl: string }): Promise<Carousel> {
+    const { id, imageUrl } = data
+    return this.prisma.carousel.update({
       where: { id },
-      data: { publicId, url }
+      data: { imageUrl }
     })
   }
 

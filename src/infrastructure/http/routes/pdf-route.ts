@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { TYPES } from '@/types'
 import { PdfController } from '@/app/controllers/pdf-controller'
 import { createPdfSchema, pdfResponseSchema } from '@/domain/schemas/pdf-schema'
-import { upload } from '@/infrastructure/config/multer'
+import { pdfUpload } from '@/infrastructure/config/multer'
 // import { PdfController } from '@/app/controllers/pdf-controller'
 // import { upload } from '../config/multer-config'
 // import { createPdfSchema, pdfResponseSchema } from '@/domain/schemas/pdf-schemas'
@@ -22,7 +22,7 @@ export default async function pdfRoutes(fastify: FastifyInstance) {
           201: pdfResponseSchema
         }
       },
-      preHandler: upload.array('pdfs'),
+      preHandler: pdfUpload.array('pdfs'),
       onRequest: [fastify.authenticate, fastify.checkAdmin]
     },
     pdfController.uploadPdfs.bind(pdfController)

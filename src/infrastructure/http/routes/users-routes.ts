@@ -15,7 +15,7 @@ import {
   userDetailSchema,
   userResponseSchema
 } from '@/domain/schemas/user-schema'
-import { upload } from '@/infrastructure/config/multer'
+import { imageUpload } from '@/infrastructure/config/multer'
 
 export default async function userRoutes(fastify: FastifyInstance) {
   const userControllers = fastify.container.get<UserControllers>(TYPES.UserControllers)
@@ -126,17 +126,18 @@ export default async function userRoutes(fastify: FastifyInstance) {
       userControllers.getUserDetails.bind(userControllers)
     )
 
-  fastify.patch<{ Body: { url: string; public_id: string } }>(
+  fastify.patch(
     '/update-profile-pic',
     {
       schema: {
         tags: ['User'],
-        body: updateProfilePicSchema,
+        consumes: ['multipart/form-data'],
         response: {
-          200: userDetailResponseSchema
+          200: userResponseSchema
         }
       },
-      onRequest: [fastify.authenticate]
+      onRequest: [fastify.authenticate],
+      preHandler: imageUpload.single('profilePic')
     },
     userControllers.updateProfilePic.bind(userControllers)
   )

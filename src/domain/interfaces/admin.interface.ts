@@ -1,8 +1,10 @@
 import { Carousel, Contact, Subject, User } from '@prisma/client'
 
 export interface IAdminRepository {
-  createCarousel({ publicId, url }: { publicId: string; url: string }): Promise<void>
-  updateCarousel({ id, publicId, url }: { id: string; publicId: string; url: string }): Promise<void>
+  createCarousel(data: { imageUrl: string }): Promise<Carousel>
+
+  updateCarousel(data: { id: string; imageUrl: string }): Promise<Carousel>
+
   deleteCarousel({ id }: { id: string }): Promise<void>
   getCarousels(): Promise<Carousel[]>
   getEnrolledUsers(

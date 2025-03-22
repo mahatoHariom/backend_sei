@@ -11,14 +11,10 @@ datasource db {
 }
 
 model Carousel {
-    id          String   @id @default(uuid())
-    title       String
-    description String?
-    imageUrl    String
-    link        String?
-    active      Boolean  @default(true)
-    createdAt   DateTime @default(now())
-    updatedAt   DateTime @updatedAt
+    id        String   @id @default(uuid())
+    imageUrl  String
+    createdAt DateTime @default(now())
+    updatedAt DateTime @updatedAt
 }
 
 model Contact {
@@ -33,19 +29,25 @@ model Contact {
 }
 
 model User {
-    id         String        @id @default(uuid())
-    email      String        @unique
-    fullName   String        @map("name")
-    password   String
-    isVerified Boolean       @default(false)
-    role       UserRole      @default(USER)
-    createdAt  DateTime      @default(now())
-    updatedAt  DateTime      @updatedAt
-    userDetail UserDetail?   @relation("UserDetailRelation")
-    contacts   Contact[]     @relation("UserContacts")
-    subjects   UserSubject[]
-    PdfFile    PdfFile[]
-    Practice   Practice[]
+    id                String        @id @default(uuid())
+    email             String        @unique
+    fullName          String        @map("name")
+    password          String
+    isVerified        Boolean       @default(false)
+    role              UserRole      @default(USER)
+    phoneNumber       String?
+    address           String?
+    motherName        String?
+    fatherName        String?
+    parentContact     String?
+    schoolCollegeName String?
+    profilePicUrl     String?
+    createdAt         DateTime      @default(now())
+    updatedAt         DateTime      @updatedAt
+    contacts          Contact[]     @relation("UserContacts")
+    subjects          UserSubject[]
+    PdfFile           PdfFile[]
+    Practice          Practice[]
 }
 
 model Subject {
@@ -72,29 +74,6 @@ model UserSubject {
     user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
     subject   Subject  @relation(fields: [subjectId], references: [id], onDelete: Cascade)
     createdAt DateTime @default(now())
-}
-
-model UserDetail {
-    id                String      @id @default(uuid())
-    phoneNumber       String?
-    address           String?
-    motherName        String?
-    fatherName        String?
-    parentContact     String?
-    schoolCollegeName String?
-    profilePicId      String?
-    profilePic        ProfilePic? @relation(fields: [profilePicId], references: [id], onDelete: SetNull)
-    user              User        @relation("UserDetailRelation", fields: [userId], references: [id], onDelete: Cascade)
-    userId            String      @unique
-}
-
-model ProfilePic {
-    id         String       @id @default(uuid())
-    publicId   String       @map("public_id")
-    url        String
-    createdAt  DateTime     @default(now())
-    updatedAt  DateTime     @updatedAt
-    UserDetail UserDetail[]
 }
 
 model PdfFile {

@@ -8,13 +8,14 @@ import { IAdminRepository } from '@/domain/interfaces/admin.interface'
 export class AdminService {
   constructor(@inject(TYPES.IAdminRepository) private adminRepository: IAdminRepository) {}
 
-  async createCarousel({ publicId, url }: { publicId: string; url: string }): Promise<void> {
-    return this.adminRepository.createCarousel({ publicId, url })
+  // Create a carousel
+  async createCarousel(data: { imageUrl: string }): Promise<Carousel> {
+    return this.adminRepository.createCarousel(data)
   }
 
   // Update a carousel
-  async updateCarousel({ id, publicId, url }: { id: string; publicId: string; url: string }): Promise<void> {
-    return this.adminRepository.updateCarousel({ id, publicId, url })
+  async updateCarousel(data: { id: string; imageUrl: string }): Promise<Carousel> {
+    return this.adminRepository.updateCarousel(data)
   }
 
   // Delete a carousel

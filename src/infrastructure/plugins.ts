@@ -20,11 +20,17 @@ export async function registerPlugins(app: FastifyInstance) {
       'https://www.seiinstitute.com',
       'http://www.seiinstitute.com',
       'http://localhost:3000'
-    ]
+    ],
+    methods: ['GET', 'PUT', 'POST', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    exposedHeaders: ['Content-Range', 'X-Content-Range'],
+    maxAge: 86400
   })
 
   await app.register(helmet, {
-    contentSecurityPolicy: false
+    contentSecurityPolicy: false,
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    crossOriginEmbedderPolicy: false
   })
 
   await app.register(rateLimit, {

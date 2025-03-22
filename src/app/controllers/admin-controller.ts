@@ -8,19 +8,37 @@ import { AdminService } from '../services/admin-service'
 export class AdminController {
   constructor(@inject(TYPES.AdminService) private adminService: AdminService) {}
 
-  async createCarousel(request: FastifyRequest<{ Body: { publicId: string; url: string } }>, reply: FastifyReply) {
-    const { publicId, url } = request.body
-    await this.adminService.createCarousel({ publicId, url })
+  async createCarousel(request: FastifyRequest, reply: FastifyReply) {
+    if (!request.file) {
+      throw new Error('No carousel image uploaded')
+    }
+
+    const file = request.file as any
+    const imageUrl = `/uploads/${file.filename}`
+
+    await this.adminService.createCarousel({
+      imageUrl
+    })
+
     reply.status(201).send()
   }
 
   // Update carousel
-  async updateCarousel(
-    request: FastifyRequest<{ Body: { id: string; publicId: string; url: string } }>,
-    reply: FastifyReply
-  ) {
-    const { id, publicId, url } = request.body
-    await this.adminService.updateCarousel({ id, publicId, url })
+  async updateCarousel(request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) {
+    const { id } = request.params
+
+    if (!request.file) {
+      throw new Error('No carousel image uploaded')
+    }
+
+    const file = request.file as any
+    const imageUrl = `/uploads/${file.filename}`
+
+    await this.adminService.updateCarousel({
+      id,
+      imageUrl
+    })
+
     reply.status(200).send()
   }
 

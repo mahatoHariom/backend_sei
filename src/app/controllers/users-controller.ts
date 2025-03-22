@@ -8,7 +8,7 @@ import { UserServices } from '../services/user-service'
 import { Messages, StatusCode } from '@/domain/constants/messages'
 import { generateJsonWebToken, generateRefreshToken } from '@/domain/utils/jwt'
 import { SubjectService } from '../services/subject-service'
-import { UserDetail } from '@prisma/client'
+// import { UserDetail } from '@prisma/client'
 
 @injectable()
 export class UserControllers {
@@ -122,64 +122,71 @@ export class UserControllers {
       Body: {
         fullName?: string
         email?: string
-        userDetails?: Partial<CreateUserDetailInput>
+        phoneNumber?: string
+        address?: string
+        motherName?: string
+        fatherName?: string
+        parentContact?: string
+        schoolCollegeName?: string
       }
     }>,
     reply: FastifyReply
   ) {
-    const { fullName, email, userDetails } = request.body
+    const { fullName, email, phoneNumber, address, motherName, fatherName, parentContact, schoolCollegeName } =
+      request.body
+
     const userId = request.user?.id
 
     if (!userId) {
       throw new ApiError(Messages.INVALID_CREDENTIAL, StatusCode.Unauthorized)
     }
 
-    // Update user base info
-    const updatedUser = await this.userServices.updateUserProfile(userId, { fullName, email })
-
-    // Update user details if provided
-    if (userDetails) {
-      await this.userServices.updateUserDetails(userId, userDetails)
-    }
-
-    const user = await this.authRepository.findById(userId)
-    console.log(user, 'user')
-
-    return reply.status(200).send(user)
-  }
-
-  async updateProfilePic(
-    request: FastifyRequest<{
-      Body: {
-        url: string
-        public_id: string
-      }
-    }>,
-    reply: FastifyReply
-  ) {
-    const userId = request.user?.id
-    const { url, public_id } = request.body
-
-    if (!userId) {
-      throw new ApiError(Messages.INVALID_CREDENTIAL, StatusCode.Unauthorized)
-    }
-
-    const updatedUserDetail = await this.userServices.updateProfilePic(userId, {
-      url,
-      publicId: public_id
+    // Update user with all fields
+    const updatedUser = await this.userServices.updateUserProfile(userId, {
+      fullName,
+      email,
+      phoneNumber,
+      address,
+      motherName,
+      fatherName,
+      parentContact,
+      schoolCollegeName
     })
 
-    return reply.status(200).send(updatedUserDetail)
+    return reply.status(200).send(updatedUser)
+  }
+
+  async updateProfilePic(request: FastifyRequest, reply: FastifyReply) {
+    const userId = request.user?.id
+
+    if (!userId) {
+      throw new ApiError(Messages.INVALID_CREDENTIAL, StatusCode.Unauthorized)
+    }
+
+    if (!request.file) {
+      throw new ApiError('No file uploaded', StatusCode.BadRequest)
+    }
+
+    const file = request.file as any
+    const profilePicUrl = `/uploads/${file.filename}`
+
+    const updatedUser = await this.userServices.updateProfilePic(userId, profilePicUrl)
+
+    return reply.status(200).send(updatedUser)
   }
 
   async getUserDetails(request: FastifyRequest, reply: FastifyReply) {
-    const isUser = await this.authRepository.findById(request.user.id)
-    if (!isUser) {
+    const userId = request.user.id
+    if (!userId) {
       throw new ApiError(Messages.USER_NOT_FOUND, StatusCode.Unauthorized)
     }
-    const details = await this.authRepository.getUserDetails(request.user.id)
 
-    return reply.status(200).send(details)
+    const user = await this.authRepository.findById(userId)
+    if (!user) {
+      throw new ApiError(Messages.USER_NOT_FOUND, StatusCode.Unauthorized)
+    }
+
+    return reply.status(200).send(user)
   }
 
   async unenrollFromSubject(request: FastifyRequest<{ Body: EnrollSubjectInput }>, reply: FastifyReply) {
