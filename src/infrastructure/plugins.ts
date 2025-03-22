@@ -14,24 +14,10 @@ export async function registerPlugins(app: FastifyInstance) {
   // Security plugins
   await app.register(cors, {
     credentials: true,
-    origin: [
-      'https://seiinstitute.com',
-      'http://seiinstitute.com',
-      'https://www.seiinstitute.com',
-      'http://www.seiinstitute.com',
-      'http://localhost:3000'
-    ],
-    methods: ['GET', 'PUT', 'POST', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    exposedHeaders: ['Content-Range', 'X-Content-Range'],
-    maxAge: 86400
+    origin: ['*']
   })
 
-  await app.register(helmet, {
-    contentSecurityPolicy: false,
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-    crossOriginEmbedderPolicy: false
-  })
+  await app.register(helmet)
 
   await app.register(rateLimit, {
     max: 100000,
