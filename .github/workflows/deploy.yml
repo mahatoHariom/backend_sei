@@ -39,29 +39,30 @@ jobs:
       - name: Build application
         run: npm run build
 
-      - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.8.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      - name: Install sshpass
+        run: sudo apt-get install -y sshpass
 
-      - name: Setup known hosts
+      - name: Setup SSH directory and disable StrictHostKeyChecking
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H 37.27.247.208 >> ~/.ssh/known_hosts
+          echo "StrictHostKeyChecking no" > ~/.ssh/config
+          chmod 600 ~/.ssh/config
 
       - name: Deploy to server
+        env:
+          SERVER_PASSWORD: gkjaRhMActfMatPW7nvd
         run: |
           # Create a temporary deployment directory
-          ssh root@37.27.247.208 'mkdir -p /tmp/backend-deploy'
+          sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 'mkdir -p /tmp/backend-deploy'
 
           # Copy built files to server
-          rsync -avz --delete ./build/ ./package.json ./package-lock.json ./prisma/ root@37.27.247.208:/tmp/backend-deploy/
+          sshpass -p "$SERVER_PASSWORD" rsync -avz --delete ./build/ ./package.json ./package-lock.json ./prisma/ root@37.27.247.208:/tmp/backend-deploy/
 
           # Copy .env.production file
-          rsync -avz ./.env.production root@37.27.247.208:/tmp/backend-deploy/
+          sshpass -p "$SERVER_PASSWORD" rsync -avz ./.env.production root@37.27.247.208:/tmp/backend-deploy/
 
           # Deploy on server
-          ssh root@37.27.247.208 'cd /tmp/backend-deploy && \
+          sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 'cd /tmp/backend-deploy && \
             # Install production dependencies
             npm ci --production && \
             # Run prisma generate if needed
@@ -98,8 +99,10 @@ jobs:
             rm -rf /tmp/backend-deploy'
 
       - name: Verify deployment
+        env:
+          SERVER_PASSWORD: gkjaRhMActfMatPW7nvd
         run: |
           # Wait for service to start
           sleep 5
           # Check if service is running
-          ssh root@37.27.247.208 'systemctl status backend'
+          sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 'systemctl status backend'

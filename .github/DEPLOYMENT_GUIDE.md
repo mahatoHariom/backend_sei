@@ -8,56 +8,20 @@ This guide explains how to set up and use the GitHub Actions CI/CD workflow for 
 - Access to the target server (IP: 37.27.247.208)
 - GitHub repository permissions to add secrets and run workflows
 
-## Step 1: Set Up SSH Key for Deployment
+## Step 1: Set Up Server Authentication
 
-You need to create an SSH key that GitHub Actions will use to connect to your server. Run the provided setup script:
-
-```bash
-# Make the script executable
-chmod +x .github/setup-ssh-key.sh
-
-# Run the script
-./.github/setup-ssh-key.sh
-```
-
-The script will:
-
-1. Generate a new SSH key pair
-2. Display the public key (to add to your server)
-3. Display the private key (to add to GitHub secrets)
-4. Provide further instructions
-
-## Step 2: Add the SSH Key to Your Server
-
-Connect to your server and add the public key to the authorized_keys file:
-
-```bash
-# Connect to your server
-ssh root@37.27.247.208
-
-# Create .ssh directory if it doesn't exist
-mkdir -p ~/.ssh
-chmod 700 ~/.ssh
-
-# Add the public key to authorized_keys
-echo "YOUR_PUBLIC_KEY_HERE" >> ~/.ssh/authorized_keys
-chmod 600 ~/.ssh/authorized_keys
-```
-
-Replace `YOUR_PUBLIC_KEY_HERE` with the public key generated in Step 1.
-
-## Step 3: Add the Private Key to GitHub Secrets
+The CI/CD workflow uses password authentication to connect to your server. You need to add the server password as a GitHub secret:
 
 1. Go to your GitHub repository
 2. Navigate to Settings > Secrets and variables > Actions
 3. Click "New repository secret"
-4. Name: `SSH_PRIVATE_KEY`
-5. Value: [paste the private key from Step 1]
+4. Name: `SERVER_PASSWORD`
+5. Value: `gkjaRhMActfMatPW7nvd`
 6. Click "Add secret"
 
-## Step 4: Set Up Environment Secrets
+## Step 2: Set Up Environment Secrets
 
-In addition to the SSH key, you need to set up environment secrets for your application:
+In addition to the server password, you need to set up environment secrets for your application:
 
 1. Follow the detailed instructions in [ENVIRONMENT_SECRETS.md](./.github/ENVIRONMENT_SECRETS.md)
 2. At minimum, you need to set up:
@@ -68,11 +32,15 @@ In addition to the SSH key, you need to set up environment secrets for your appl
 
 This step is critical for your application to function properly after deployment.
 
-## Step 5: Prepare Your Server
+## Step 3: Prepare Your Server
 
 On your server, create directories for deployment:
 
 ```bash
+# Connect to your server
+ssh root@37.27.247.208
+# Password: gkjaRhMActfMatPW7nvd
+
 # Create deployment directory
 mkdir -p /opt/sei-institute/backend
 
@@ -80,7 +48,7 @@ mkdir -p /opt/sei-institute/backend
 chmod -R 755 /opt/sei-institute/backend
 ```
 
-## Step 6: Triggering Deployments
+## Step 4: Triggering Deployments
 
 The CI/CD workflow is set to automatically trigger when you push to the main branch. You can also manually trigger deployments:
 
@@ -105,7 +73,7 @@ The backend workflow:
 If you encounter issues with the deployment:
 
 1. Check the GitHub Actions logs for detailed error messages
-2. Verify that the SSH key is correctly set up
+2. Verify that the server password is correctly set up in GitHub Secrets
 3. Check the service status on your server:
    ```bash
    systemctl status backend

@@ -4,9 +4,9 @@ This guide explains how to set up the necessary GitHub Secrets for deploying you
 
 ## Required Secrets
 
-### SSH Access Secret
+### Server Authentication
 
-- `SSH_PRIVATE_KEY`: The private SSH key for connecting to the deployment server
+- `SERVER_PASSWORD`: The password for the root user on the server (gkjaRhMActfMatPW7nvd)
 
 ### Backend Secrets
 
@@ -28,12 +28,10 @@ This guide explains how to set up the necessary GitHub Secrets for deploying you
 
 Here are examples of the values for each secret (replace with your actual values):
 
-### SSH Secret
+### Server Authentication
 
 ```
-SSH_PRIVATE_KEY=-----BEGIN OPENSSH PRIVATE KEY-----
-...your private key content...
------END OPENSSH PRIVATE KEY-----
+SERVER_PASSWORD=gkjaRhMActfMatPW7nvd
 ```
 
 ### Backend Secrets
