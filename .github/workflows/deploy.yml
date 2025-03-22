@@ -18,16 +18,14 @@ jobs:
         with:
           node-version: '20'
 
+      # Try without specifying working-directory if backend is at root
       - name: Install dependencies
-        working-directory: backend # Removed "./" prefix; adjust if nested (e.g., sei-institute/backend)
         run: npm ci
 
       - name: Build
-        working-directory: backend
         run: npm run build
 
       - name: Prepare deployment package
-        working-directory: backend
         run: |
           mkdir -p deploy
           cp -r build package.json package-lock.json prisma .env.example deploy/
@@ -41,10 +39,11 @@ jobs:
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
-          source: 'backend/deploy/*' # Adjusted to match working-directory
+          source: 'deploy/*'
           target: '/tmp/sei-deploy'
-          strip_components: 2
+          strip_components: 1
 
+      # Rest of the workflow remains the same
       - name: Move files and restart service
         uses: appleboy/ssh-action@master
         with:
