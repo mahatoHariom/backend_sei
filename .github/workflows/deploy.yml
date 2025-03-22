@@ -1,100 +1,74 @@
-name: Deploy Backend
+name: Deploy SEI Backend
 
 on:
   push:
     branches: [main]
-  workflow_dispatch:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend.yml'
 
 jobs:
-  deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
+        working-directory: ./backend
         run: npm ci
 
-      - name: Generate .env file
-        run: |
-          # Create .env file
-          echo "DATABASE_URL=postgresql://sei_user:sei@localhost:5432/sei_institute?schema=public" > .env.production
-          echo "JWT_SECRET=your-super-secret-jwt-key" >> .env.production
-          echo "PORT=3333" >> .env.production
-          echo "NODE_ENV=production" >> .env.production
-          echo "FRONTEND_URL=https://seiinstitute.com" >> .env.production
-          echo "API_URL=https://api.seiinstitute.com" >> .env.production
-
-      - name: Build application
+      - name: Build
+        working-directory: ./backend
         run: npm run build
 
-      - name: Check for node-llama-cpp dependency
+      - name: Prepare deployment package
+        working-directory: ./backend
         run: |
-          # Remove node-llama-cpp dependency if present
-          if grep -q "node-llama-cpp" package.json; then
-            echo "Removing node-llama-cpp dependency for deployment"
-            sed -i 's/"node-llama-cpp": "[^"]*",\?//g' package.json
-          fi
-
-      - name: Install sshpass
-        run: sudo apt-get update && sudo apt-get install -y sshpass
-
-      - name: Create Nginx config file
-        run: |
-          # Create Nginx config file
-          echo "server {" > backend_nginx.conf
-          echo "    listen 80;" >> backend_nginx.conf
-          echo "    listen [::]:80;" >> backend_nginx.conf
-          echo "    server_name api.seiinstitute.com;" >> backend_nginx.conf
-          echo "" >> backend_nginx.conf
-          echo "    location / {" >> backend_nginx.conf
-          echo "        proxy_pass http://localhost:3333;" >> backend_nginx.conf
-          echo "        proxy_http_version 1.1;" >> backend_nginx.conf
-          echo "        proxy_set_header Upgrade \$http_upgrade;" >> backend_nginx.conf
-          echo "        proxy_set_header Connection \"upgrade\";" >> backend_nginx.conf
-          echo "        proxy_set_header Host \$host;" >> backend_nginx.conf
-          echo "        proxy_cache_bypass \$http_upgrade;" >> backend_nginx.conf
-          echo "    }" >> backend_nginx.conf
-          echo "}" >> backend_nginx.conf
+          mkdir -p deploy
+          cp -r build package.json package-lock.json prisma .env.example deploy/
+          cd deploy
+          # Create a production-only package without dev dependencies
+          npm ci --production
 
       - name: Deploy to server
-        run: |
-          # Create application directory
-          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "mkdir -p /var/www/sei-institute/backend"
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          source: 'backend/deploy/*'
+          target: '/tmp/sei-deploy'
+          strip_components: 2
 
-          # Copy built files directly to the server (trying both dist and build directories)
-          if [ -d "dist" ]; then
-            echo "Using dist directory for deployment"
-            sshpass -p "gkjaRhMActfMatPW7nvd" rsync -avz -e "ssh -o StrictHostKeyChecking=no" --delete ./dist/ ./package.json ./package-lock.json ./prisma/ ./.env.production root@37.27.247.208:/var/www/sei-institute/backend/
-          else
-            echo "Using build directory for deployment"
-            sshpass -p "gkjaRhMActfMatPW7nvd" rsync -avz -e "ssh -o StrictHostKeyChecking=no" --delete ./build/ ./package.json ./package-lock.json ./prisma/ ./.env.production root@37.27.247.208:/var/www/sei-institute/backend/
-          fi
+      - name: Move files and restart service
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: 22
+          script: |
+            mkdir -p /var/www/sei-institute/backend
+            cp -r /tmp/sei-deploy/* /var/www/sei-institute/backend/
+            cd /var/www/sei-institute/backend
 
-          # Remove any existing node-llama-cpp dependency on the server
-          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "cd /var/www/sei-institute/backend && if grep -q \"node-llama-cpp\" package.json; then sed -i 's/\"node-llama-cpp\": \"[^\"]*\",\?//g' package.json; fi"
+            # Set up environment variables
+            if [ ! -f .env ]; then
+              cp .env.example .env
+              # You should manually update the .env file with real values after the first deployment
+            fi
 
-          # Install dependencies with correct Prisma versions
-          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "cd /var/www/sei-institute/backend && npm ci --production --no-optional --omit=dev && npm install prisma@6.5.0 @prisma/client@6.5.0 --save-exact && npx prisma generate && mv .env.production .env"
+            # Run database migrations
+            npx prisma migrate deploy
 
-          # Find main file from package.json
-          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "cd /var/www/sei-institute/backend && MAIN_FILE=\$(node -e \"try { const pkg = require('./package.json'); console.log(pkg.main || (require('fs').existsSync('./dist/index.js') ? 'dist/index.js' : 'build/index.js')); } catch(e) { console.log('build/index.js'); }\") && echo \"Using main file: \$MAIN_FILE\" && pm2 delete backend || true && PORT=3333 pm2 start \$MAIN_FILE --name backend && pm2 save"
+            # Start or restart the application
+            pm2 restart sei-backend || pm2 start build/server.js --name sei-backend
 
-      - name: Configure Nginx
-        run: |
-          # Copy Nginx config file
-          sshpass -p "gkjaRhMActfMatPW7nvd" scp -o StrictHostKeyChecking=no backend_nginx.conf root@37.27.247.208:/etc/nginx/sites-available/backend
-
-          # Enable site and reload Nginx
-          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "ln -sf /etc/nginx/sites-available/backend /etc/nginx/sites-enabled/ && nginx -t && systemctl reload nginx"
-
-      - name: Verify deployment
-        run: |
-          # Check application status
-          sshpass -p "gkjaRhMActfMatPW7nvd" ssh -o StrictHostKeyChecking=no root@37.27.247.208 "pm2 status backend && curl -s http://localhost:3333 || echo 'Backend API is running (no response body)'"
+            # Clean up
+            rm -rf /tmp/sei-deploy
