@@ -1,191 +1,105 @@
-name: Backend CI/CD Pipeline
+name: Deploy Backend
 
 on:
   push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  test:
+  deploy:
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        node-version: [20.x]
-
     steps:
       - uses: actions/checkout@v4
-      - name: Use Node.js ${{ matrix.node-version }}
+
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: '18'
           cache: 'npm'
-          cache-dependency-path: 'package-lock.json'
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Format check
-        run: npm run format:check
-
-  build-and-deploy:
-    runs-on: ubuntu-latest
-    needs: [test]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Use Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20.x'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Create .env file from secrets
+      - name: Generate .env file from secrets
         run: |
-          cat > .env << EOL
-          PORT=3001
-          DATABASE_URL=postgresql://sei:sei@37.27.247.208:5432/sei_institute?schema=public
-          CLIENT_ENDPOINT=${{ secrets.CLIENT_ENDPOINT }}
-          JWT_SECRET=${{ secrets.JWT_SECRET || 'your-super-secret-jwt-key' }}
-          ACCESS_TOKEN_EXPIRES=${{ secrets.ACCESS_TOKEN_EXPIRES || '15m' }}
-          REFRESH_TOKEN_EXPIRES=${{ secrets.REFRESH_TOKEN_EXPIRES || '7d' }}
-          NODE_ENV=production
-          HUGGING_FACE_KEY=${{ secrets.HUGGING_FACE_KEY || '' }}
-          API_URL=${{ secrets.API_URL || 'http://api.seiinstitute.com' }}
-          EOL
+          # Create .env file from secrets
+          echo "DATABASE_URL=${{ secrets.BACKEND_DATABASE_URL }}" > .env.production
+          echo "JWT_SECRET=${{ secrets.BACKEND_JWT_SECRET }}" >> .env.production
+          echo "PORT=${{ secrets.BACKEND_PORT || '3333' }}" >> .env.production
+          echo "NODE_ENV=production" >> .env.production
+          # Add other environment variables as needed
+          echo "API_URL=${{ secrets.BACKEND_API_URL }}" >> .env.production
+          echo "FRONTEND_URL=${{ secrets.FRONTEND_URL }}" >> .env.production
 
-      - name: Build
+          # Display .env file content (without sensitive data)
+          echo "Generated .env.production file (with sensitive data masked):"
+          cat .env.production | sed 's/=.*/=********/'
+
+      - name: Build application
         run: npm run build
 
-      - name: Generate Prisma client
-        run: npx prisma generate
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: Create deployment package
+      - name: Setup known hosts
         run: |
-          mkdir -p deploy
-          cp -r build deploy/
-          cp -r prisma deploy/
-          mkdir -p deploy/uploads
-          mkdir -p deploy/uploads/images
-          cp package.json deploy/
-          cp package-lock.json deploy/
-          cp .env deploy/
+          mkdir -p ~/.ssh
+          ssh-keyscan -H 37.27.247.208 >> ~/.ssh/known_hosts
 
-          # Make sure node_modules/.prisma is included for the Prisma client
-          mkdir -p deploy/node_modules/.prisma
-          if [ -d "node_modules/.prisma" ]; then
-            cp -r node_modules/.prisma deploy/node_modules/
-          fi
+      - name: Deploy to server
+        run: |
+          # Create a temporary deployment directory
+          ssh root@37.27.247.208 'mkdir -p /tmp/backend-deploy'
 
-          tar -czf backend-deploy.tar.gz -C deploy .
+          # Copy built files to server
+          rsync -avz --delete ./build/ ./package.json ./package-lock.json ./prisma/ root@37.27.247.208:/tmp/backend-deploy/
 
-      - name: Deploy to production server
-        uses: appleboy/scp-action@master
-        with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ${{ secrets.SERVER_USER }}
-          password: ${{ secrets.SERVER_PASSWORD }}
-          source: 'backend-deploy.tar.gz'
-          target: '/tmp'
+          # Copy .env.production file
+          rsync -avz ./.env.production root@37.27.247.208:/tmp/backend-deploy/
 
-      - name: Extract and setup on server
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ${{ secrets.SERVER_USER }}
-          password: ${{ secrets.SERVER_PASSWORD }}
-          script: |
-            # Kill any existing processes on port 3001
-            if lsof -i :3001 -t; then
-              kill -9 $(lsof -i :3001 -t) || true
-            fi
+          # Deploy on server
+          ssh root@37.27.247.208 'cd /tmp/backend-deploy && \
+            # Install production dependencies
+            npm ci --production && \
+            # Run prisma generate if needed
+            npx prisma generate && \
+            # Stop existing service if it exists
+            [ -f /etc/systemd/system/backend.service ] && systemctl stop backend || true && \
+            # Move to final location
+            mkdir -p /opt/sei-institute/backend && \
+            rm -rf /opt/sei-institute/backend/* && \
+            cp -r /tmp/backend-deploy/* /opt/sei-institute/backend/ && \
+            # Copy environment file
+            cp /tmp/backend-deploy/.env.production /opt/sei-institute/backend/.env && \
+            # Setup systemd service if it doesn't exist
+            if [ ! -f /etc/systemd/system/backend.service ]; then \
+              echo "[Unit]
+              Description=SEI Institute Backend Service
+              After=network.target
 
-            # Create directory if not exists
-            mkdir -p /var/www/sei-institute/backend
+              [Service]
+              User=root
+              WorkingDirectory=/opt/sei-institute/backend
+              ExecStart=/usr/bin/npm start
+              Restart=always
+              Environment=NODE_ENV=production
 
-            # Backup the current deployment before extracting
-            if [ -d "/var/www/sei-institute/backend/build" ]; then
-              timestamp=$(date +%Y%m%d%H%M%S)
-              mkdir -p /var/www/sei-institute/backups
-              tar -czf /var/www/sei-institute/backups/backend-backup-$timestamp.tar.gz -C /var/www/sei-institute/backend .
-            fi
+              [Install]
+              WantedBy=multi-user.target" > /etc/systemd/system/backend.service && \
+              systemctl daemon-reload; \
+            fi && \
+            # Start service
+            systemctl enable backend && \
+            systemctl start backend && \
+            # Clean up
+            rm -rf /tmp/backend-deploy'
 
-            # Extract deployment package
-            tar -xzf /tmp/backend-deploy.tar.gz -C /var/www/sei-institute/backend
-
-            # Ensure uploads directory exists with proper permissions
-            mkdir -p /var/www/sei-institute/backend/uploads
-            mkdir -p /var/www/sei-institute/backend/uploads/images
-            chmod -R 777 /var/www/sei-institute/backend/uploads
-
-            # Ensure PostgreSQL is running
-            echo "Checking PostgreSQL status..."
-            if ! systemctl is-active --quiet postgresql; then
-              echo "PostgreSQL is not running. Starting PostgreSQL..."
-              systemctl start postgresql
-              sleep 5
-            fi
-
-            # Setup database if it doesn't exist
-            echo "Setting up database..."
-            sudo -u postgres psql -c "SELECT 1 FROM pg_database WHERE datname = 'sei'" | grep -q 1 || {
-              echo "Creating database and user..."
-              sudo -u postgres psql -c "CREATE ROLE sei WITH LOGIN PASSWORD 'sei';"
-              sudo -u postgres psql -c "CREATE DATABASE sei OWNER sei;"
-              sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;"
-              sudo -u postgres psql -c "ALTER USER sei WITH SUPERUSER;"
-            }
-
-            # Fix .env file with correct database URL
-            echo "Updating DATABASE_URL in .env..."
-            sed -i 's|DATABASE_URL=.*|DATABASE_URL=postgresql://sei:sei@localhost:5432/sei?schema=public|g' /var/www/sei-institute/backend/.env
-
-            # Install ALL dependencies, not just production
-            cd /var/www/sei-institute/backend
-            rm -rf node_modules
-            echo "Installing dependencies..."
-            npm install
-
-            # Generate Prisma client
-            echo "Generating Prisma client..."
-            npx prisma generate
-
-            # Run database migrations with error handling
-            echo "Running database migrations..."
-            npx prisma migrate deploy || {
-              echo "Migration failed. Attempting to create the database schema..."
-              npx prisma db push --accept-data-loss
-            }
-
-            # Delete any existing backend app in PM2
-            pm2 delete backend-app || true
-
-            # Start a fresh instance
-            echo "Starting backend app..."
-            pm2 start build/server.js --name backend-app
-            pm2 save
-
-            # Verify server is running
-            echo "Verifying backend server is running..."
-            if lsof -i :3001 | grep LISTEN; then
-              echo "✅ Backend server is running successfully on port 3001"
-            else
-              echo "⚠️ WARNING: Backend server failed to start on port 3001"
-              echo "Checking for errors in the logs..."
-              cat ~/.pm2/logs/backend-app-error.log | tail -n 20
-            fi
-
-            # Test the API
-            echo "Testing API endpoint..."
-            curl -I http://localhost:3001/api/health || echo "API health endpoint not responding"
-
-            # Cleanup
-            rm /tmp/backend-deploy.tar.gz
+      - name: Verify deployment
+        run: |
+          # Wait for service to start
+          sleep 5
+          # Check if service is running
+          ssh root@37.27.247.208 'systemctl status backend'
