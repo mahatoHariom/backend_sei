@@ -10,26 +10,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Debug directory structure
+        run: ls -la
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Install dependencies
-        working-directory: ./backend
+        working-directory: backend # Removed "./" prefix; adjust if nested (e.g., sei-institute/backend)
         run: npm ci
 
       - name: Build
-        working-directory: ./backend
+        working-directory: backend
         run: npm run build
 
       - name: Prepare deployment package
-        working-directory: ./backend
+        working-directory: backend
         run: |
           mkdir -p deploy
           cp -r build package.json package-lock.json prisma .env.example deploy/
           cd deploy
-          # Create a production-only package without dev dependencies
           npm ci --production
 
       - name: Deploy to server
@@ -39,7 +41,7 @@ jobs:
           username: ${{ secrets.SERVER_USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: 22
-          source: 'backend/deploy/*'
+          source: 'backend/deploy/*' # Adjusted to match working-directory
           target: '/tmp/sei-deploy'
           strip_components: 2
 
@@ -54,18 +56,9 @@ jobs:
             mkdir -p /var/www/sei-institute/backend
             cp -r /tmp/sei-deploy/* /var/www/sei-institute/backend/
             cd /var/www/sei-institute/backend
-
-            # Set up environment variables
             if [ ! -f .env ]; then
               cp .env.example .env
-              # You should manually update the .env file with real values after the first deployment
             fi
-
-            # Run database migrations
             npx prisma migrate deploy
-
-            # Start or restart the application
             pm2 restart sei-backend || pm2 start build/server.js --name sei-backend
-
-            # Clean up
             rm -rf /tmp/sei-deploy
