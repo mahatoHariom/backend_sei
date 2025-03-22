@@ -32,12 +32,12 @@ systemctl start postgresql
 if ! sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw sei; then
   echo "Creating database..."
   sudo -u postgres psql -c "CREATE ROLE sei WITH LOGIN PASSWORD 'sei';"
-  sudo -u postgres psql -c "CREATE DATABASE sei OWNER sei;"
-  sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;"
+  sudo -u postgres psql -c "CREATE DATABASE sei_institute OWNER sei;"
+  sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei_institute TO sei;"
   sudo -u postgres psql -c "ALTER USER sei WITH SUPERUSER;"
 else
   echo "Database already exists, granting permissions..."
-  sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei TO sei;"
+  sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE sei_institute TO sei;"
 fi
 
 echo "Backend setup complete!"
