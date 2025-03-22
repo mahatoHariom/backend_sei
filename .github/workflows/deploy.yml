@@ -37,7 +37,7 @@ jobs:
       - name: Install sshpass
         run: sudo apt-get install -y sshpass
 
-      - name: Setup SSH directory and disable StrictHostKeyChecking
+      - name: Setup SSH directory
         run: |
           mkdir -p ~/.ssh
           echo "StrictHostKeyChecking no" > ~/.ssh/config
@@ -50,8 +50,8 @@ jobs:
           # Copy built files directly to the server
           sshpass -p "$SERVER_PASSWORD" rsync -avz --delete ./build/ ./package.json ./package-lock.json ./prisma/ ./.env.production root@37.27.247.208:/opt/sei-institute/backend/
 
-          # Restart the PM2 process
-          sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 'cd /opt/sei-institute/backend && npm ci --production && npx prisma generate && mv .env.production .env && pm2 restart backend || pm2 start build/index.js --name backend && pm2 save'
+          # Restart the PM2 process - ensure necessary build tools are installed
+          sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 'cd /opt/sei-institute/backend && npm ci --production --no-optional --omit=dev && npx prisma generate && mv .env.production .env && pm2 restart backend || pm2 start build/index.js --name backend && pm2 save'
 
       - name: Verify deployment
         env:
