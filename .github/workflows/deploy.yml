@@ -61,42 +61,47 @@ jobs:
           # Copy .env.production file
           sshpass -p "$SERVER_PASSWORD" rsync -avz ./.env.production root@37.27.247.208:/tmp/backend-deploy/
 
+          # Write the service file to a local temp file
+          cat > backend.service << 'EOL'
+          [Unit]
+          Description=SEI Institute Backend Service
+          After=network.target
+
+          [Service]
+          User=root
+          WorkingDirectory=/opt/sei-institute/backend
+          ExecStart=/usr/bin/npm start
+          Restart=always
+          Environment=NODE_ENV=production
+
+          [Install]
+          WantedBy=multi-user.target
+          EOL
+
+          # Copy the service file to the server
+          sshpass -p "$SERVER_PASSWORD" scp backend.service root@37.27.247.208:/tmp/backend.service
+
           # Deploy on server
-          sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 'cd /tmp/backend-deploy && \
-            # Install production dependencies
-            npm ci --production && \
-            # Run prisma generate if needed
-            npx prisma generate && \
-            # Stop existing service if it exists
-            [ -f /etc/systemd/system/backend.service ] && systemctl stop backend || true && \
-            # Move to final location
-            mkdir -p /opt/sei-institute/backend && \
-            rm -rf /opt/sei-institute/backend/* && \
-            cp -r /tmp/backend-deploy/* /opt/sei-institute/backend/ && \
-            # Copy environment file
-            cp /tmp/backend-deploy/.env.production /opt/sei-institute/backend/.env && \
-            # Setup systemd service if it doesn't exist
-            if [ ! -f /etc/systemd/system/backend.service ]; then \
-              echo "[Unit]
-              Description=SEI Institute Backend Service
-              After=network.target
+          sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 '
+            cd /tmp/backend-deploy && 
+            npm ci --production && 
+            npx prisma generate && 
+            [ -f /etc/systemd/system/backend.service ] && systemctl stop backend || true && 
+            mkdir -p /opt/sei-institute/backend && 
+            rm -rf /opt/sei-institute/backend/* && 
+            cp -r /tmp/backend-deploy/* /opt/sei-institute/backend/ && 
+            cp /tmp/backend-deploy/.env.production /opt/sei-institute/backend/.env && 
+            if [ ! -f /etc/systemd/system/backend.service ]; then 
+              mv /tmp/backend.service /etc/systemd/system/backend.service
+              systemctl daemon-reload
+            fi && 
+            systemctl enable backend && 
+            systemctl start backend && 
+            rm -rf /tmp/backend-deploy
+          '
 
-              [Service]
-              User=root
-              WorkingDirectory=/opt/sei-institute/backend
-              ExecStart=/usr/bin/npm start
-              Restart=always
-              Environment=NODE_ENV=production
-
-              [Install]
-              WantedBy=multi-user.target" > /etc/systemd/system/backend.service && \
-              systemctl daemon-reload; \
-            fi && \
-            # Start service
-            systemctl enable backend && \
-            systemctl start backend && \
-            # Clean up
-            rm -rf /tmp/backend-deploy'
+          # Clean up local temp file
+          rm backend.service
 
       - name: Verify deployment
         env:
