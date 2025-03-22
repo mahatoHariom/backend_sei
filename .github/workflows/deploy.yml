@@ -256,12 +256,6 @@ jobs:
             echo "Installing dependencies..."
             npm install || { echo "❌ npm install failed"; npm install --verbose; exit 1; }
 
-            # Create uploads directory and set permissions
-            mkdir -p /var/www/sei-institute/backend/uploads
-            chmod 755 /var/www/sei-institute/backend/uploads
-            chown -R $USER:$USER /var/www/sei-institute/backend/uploads
-            echo "✅ Uploads directory configured."
-
             # Generate Prisma client
             echo "Generating Prisma client..."
             npx prisma generate || { echo "❌ Prisma generate failed"; cat prisma/schema.prisma; exit 1; }
