@@ -28,12 +28,8 @@ jobs:
           echo "JWT_SECRET=${{ secrets.BACKEND_JWT_SECRET || 'your-super-secret-jwt-key' }}" >> .env.production
           echo "PORT=3333" >> .env.production
           echo "NODE_ENV=production" >> .env.production
-          # Add other environment variables as needed
-          echo "FRONTEND_URL=https://sei-institute.com" >> .env.production
-
-          # Display .env file content (without sensitive data)
-          echo "Generated .env.production file (with sensitive data masked):"
-          cat .env.production | sed 's/=.*/=********/'
+          echo "FRONTEND_URL=https://seiinstitute.com" >> .env.production
+          echo "API_URL=https://api.seiinstitute.com" >> .env.production
 
       - name: Build application
         run: npm run build
@@ -51,64 +47,15 @@ jobs:
         env:
           SERVER_PASSWORD: gkjaRhMActfMatPW7nvd
         run: |
-          # Create a temporary deployment directory
-          sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 'mkdir -p /tmp/backend-deploy'
+          # Copy built files directly to the server
+          sshpass -p "$SERVER_PASSWORD" rsync -avz --delete ./build/ ./package.json ./package-lock.json ./prisma/ ./.env.production root@37.27.247.208:/opt/sei-institute/backend/
 
-          # Copy built files to server
-          sshpass -p "$SERVER_PASSWORD" rsync -avz --delete ./build/ ./package.json ./package-lock.json ./prisma/ root@37.27.247.208:/tmp/backend-deploy/
-
-          # Copy .env.production file
-          sshpass -p "$SERVER_PASSWORD" rsync -avz ./.env.production root@37.27.247.208:/tmp/backend-deploy/
-
-          # Write the service file to a local temp file
-          cat > backend.service << 'EOL'
-          [Unit]
-          Description=SEI Institute Backend Service
-          After=network.target postgresql.service
-
-          [Service]
-          User=root
-          WorkingDirectory=/opt/sei-institute/backend
-          ExecStart=/usr/bin/node /opt/sei-institute/backend/build/index.js
-          Restart=always
-          RestartSec=10
-          Environment=NODE_ENV=production
-          StandardOutput=journal
-          StandardError=journal
-          SyslogIdentifier=backend
-
-          [Install]
-          WantedBy=multi-user.target
-          EOL
-
-          # Copy the service file to the server
-          sshpass -p "$SERVER_PASSWORD" scp backend.service root@37.27.247.208:/tmp/backend.service
-
-          # Deploy on server
-          sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 '
-            cd /tmp/backend-deploy && 
-            npm ci --production && 
-            npx prisma generate && 
-            [ -f /etc/systemd/system/backend.service ] && systemctl stop backend || true && 
-            mkdir -p /opt/sei-institute/backend && 
-            rm -rf /opt/sei-institute/backend/* && 
-            cp -r /tmp/backend-deploy/* /opt/sei-institute/backend/ && 
-            cp /tmp/backend-deploy/.env.production /opt/sei-institute/backend/.env && 
-            mv /tmp/backend.service /etc/systemd/system/backend.service && 
-            systemctl daemon-reload && 
-            systemctl enable backend && 
-            systemctl start backend && 
-            rm -rf /tmp/backend-deploy
-          '
-
-          # Clean up local temp file
-          rm backend.service
+          # Restart the PM2 process
+          sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 'cd /opt/sei-institute/backend && npm ci --production && npx prisma generate && mv .env.production .env && pm2 restart backend || pm2 start build/index.js --name backend && pm2 save'
 
       - name: Verify deployment
         env:
           SERVER_PASSWORD: gkjaRhMActfMatPW7nvd
         run: |
-          # Wait for service to start
-          sleep 10
-          # Check if service is running
-          sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 'systemctl status backend'
+          # Check if service is running with PM2
+          sshpass -p "$SERVER_PASSWORD" ssh root@37.27.247.208 'pm2 status backend'
