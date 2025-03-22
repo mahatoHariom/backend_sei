@@ -18,7 +18,6 @@ jobs:
         with:
           node-version: '20'
 
-      # Try without specifying working-directory if backend is at root
       - name: Install dependencies
         run: npm ci
 
@@ -35,21 +34,20 @@ jobs:
       - name: Deploy to server
         uses: appleboy/scp-action@master
         with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ${{ secrets.SERVER_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          host: 37.27.247.208
+          username: root
+          password: gkjaRhMActfMatPW7nvd
           port: 22
           source: 'deploy/*'
           target: '/tmp/sei-deploy'
           strip_components: 1
 
-      # Rest of the workflow remains the same
       - name: Move files and restart service
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ secrets.SERVER_IP }}
-          username: ${{ secrets.SERVER_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          host: 37.27.247.208
+          username: root
+          password: gkjaRhMActfMatPW7nvd
           port: 22
           script: |
             mkdir -p /var/www/sei-institute/backend
