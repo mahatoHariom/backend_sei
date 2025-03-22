@@ -38,6 +38,8 @@ const createApp = async (): Promise<FastifyInstance> => {
     // Register all plugins
     await registerPlugins(app)
 
+    
+
     // Register all middlewares
     await registerMiddlewares(app)
 
