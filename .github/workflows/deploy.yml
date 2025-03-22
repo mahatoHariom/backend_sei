@@ -27,10 +27,11 @@ jobs:
       - name: Prepare deployment package
         run: |
           mkdir -p deploy
-          cp -r build package.json package-lock.json prisma .env.example deploy/
+          cp -r build package.json package-lock.json prisma deploy/
+          [ -f .env.example ] && cp .env.example deploy/ || echo "No .env.example found, skipping"
           cd deploy
           npm ci --production
-          npx prisma generate  # Generate Prisma Client in the deployment package
+          npx prisma generate
 
       - name: Deploy to server
         uses: appleboy/scp-action@master
@@ -54,12 +55,22 @@ jobs:
             mkdir -p /var/www/sei-institute/backend
             cp -r /tmp/sei-deploy/* /var/www/sei-institute/backend/
             cd /var/www/sei-institute/backend
+            npm ci --production
+            npx prisma generate
+            # Create .env if it doesn't exist and populate with secrets
             if [ ! -f .env ]; then
-              cp .env.example .env
+              [ -f .env.example ] && cp .env.example .env || echo "" > .env
+              echo "PORT=9000" >> .env
+              echo "DATABASE_URL=\"postgresql://sei_user:sei@37.27.247.208:5432/sei_institute?schema=public\"" >> .env
+              echo "CLIENT_ENDPOINT=\"https://seiinstitute.com\"" >> .env
+              echo "JWT_SECRET=\"${{ secrets.JWT_SECRET }}\"" >> .env
+              echo "ACCESS_TOKEN_EXPIRES=\"1d\"" >> .env
+              echo "REFRESH_TOKEN_EXPIRES=\"7d\"" >> .env
+              echo "NODE_ENV=\"production\"" >> .env
+              echo "POSTGRES_HOST_AUTH_METHOD=\"trust\"" >> .env
+              echo "HUGGING_FACE_KEY=\"${{ secrets.HUGGING_FACE_KEY }}\"" >> .env
             fi
-            npm ci --production  # Ensure dependencies are installed on the server
-            npx prisma generate  # Ensure Prisma Client is generated on the server
-            npx prisma migrate deploy  # Run migrations
-            npm run prisma:seed  # Run the seed script
+            npx prisma migrate deploy
+            npm run prisma:seed
             pm2 restart sei-backend || pm2 start build/server.js --name sei-backend
             rm -rf /tmp/sei-deploy
