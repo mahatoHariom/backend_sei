@@ -40,11 +40,12 @@ jobs:
           username: root
           password: gkjaRhMActfMatPW7nvd
           port: 22
-          source: 'deploy/*'
-          target: '/tmp/sei-deploy'
-          strip_components: 1
+          source: 'deploy/*' # Copy contents of deploy/
+          target: '/var/www/sei-institute/backend' # Directly to target directory
+          strip_components: 1 # Remove the 'deploy' prefix
+          overwrite: true # Overwrite existing files if needed
 
-      - name: Move files and restart service
+      - name: Configure and restart service
         uses: appleboy/ssh-action@master
         with:
           host: 37.27.247.208
@@ -52,12 +53,9 @@ jobs:
           password: gkjaRhMActfMatPW7nvd
           port: 22
           script: |
-            mkdir -p /var/www/sei-institute/backend
-            cp -r /tmp/sei-deploy/* /var/www/sei-institute/backend/
             cd /var/www/sei-institute/backend
             npm ci --production
             npx prisma generate
-            # Create .env if it doesn't exist and populate with secrets
             if [ ! -f .env ]; then
               [ -f .env.example ] && cp .env.example .env || echo "" > .env
               echo "PORT=9000" >> .env
@@ -73,4 +71,3 @@ jobs:
             npx prisma migrate deploy
             npm run prisma:seed
             pm2 restart sei-backend || pm2 start build/server.js --name sei-backend
-            rm -rf /tmp/sei-deploy
