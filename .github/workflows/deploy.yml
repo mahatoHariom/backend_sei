@@ -52,13 +52,12 @@ jobs:
         run: |
           cat > .env << EOL
           PORT=${{ secrets.BACKEND_PORT }}
-          DATABASE_URL=${{ secrets.DATABASE_URL }}
+          DATABASE_URL=postgresql://${{ secrets.DB_USER }}:${{ secrets.DB_PASSWORD }}@${{ secrets.DB_HOST }}:${{ secrets.DB_PORT }}/${{ secrets.DB_NAME }}
           CLIENT_ENDPOINT=${{ secrets.CLIENT_ENDPOINT }}
           JWT_SECRET=${{ secrets.JWT_SECRET }}
           ACCESS_TOKEN_EXPIRES=${{ secrets.ACCESS_TOKEN_EXPIRES }}
           REFRESH_TOKEN_EXPIRES=${{ secrets.REFRESH_TOKEN_EXPIRES }}
           NODE_ENV=production
-          POSTGRES_HOST_AUTH_METHOD=${{ secrets.POSTGRES_HOST_AUTH_METHOD }}
           HUGGING_FACE_KEY=${{ secrets.HUGGING_FACE_KEY }}
           API_URL=${{ secrets.API_URL }}
           EOL
@@ -95,6 +94,13 @@ jobs:
             # Create directory if not exists
             mkdir -p /var/www/sei-institute/backend
 
+            # Backup the current deployment before extracting
+            if [ -d "/var/www/sei-institute/backend/build" ]; then
+              timestamp=$(date +%Y%m%d%H%M%S)
+              mkdir -p /var/www/sei-institute/backups
+              tar -czf /var/www/sei-institute/backups/backend-backup-$timestamp.tar.gz -C /var/www/sei-institute/backend .
+            fi
+
             # Extract deployment package
             tar -xzf /tmp/backend-deploy.tar.gz -C /var/www/sei-institute/backend
 
@@ -102,8 +108,9 @@ jobs:
             cd /var/www/sei-institute/backend
             npm ci --production
 
-            # Run database migrations
-            npm run prisma:deploy
+            # Run database migrations (without recreating the database)
+            # This applies schema changes but doesn't drop existing data
+            npm run prisma:migrate:deploy
 
             # Setup or restart PM2
             if pm2 list | grep -q "backend-app"; then
