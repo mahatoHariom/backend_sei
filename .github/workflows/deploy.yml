@@ -14,6 +14,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm' # Cache npm dependencies
 
       - name: Install dependencies
         run: npm ci
@@ -27,15 +28,15 @@ jobs:
           cp -r build package.json package-lock.json prisma deploy/
           [ -f .env.example ] && cp .env.example deploy/
           cd deploy
-          npm ci --production
-          npx prisma generate
+          npm ci --omit=dev  # Use modern flag instead of --production
+          npx prisma generate || { echo "Prisma generate failed"; exit 1; }
 
       - name: Deploy to server
         uses: appleboy/scp-action@master
         with:
-          host: 37.27.247.208
-          username: root
-          password: gkjaRhMActfMatPW7nvd
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
           port: 22
           source: 'deploy/*'
           target: '/var/www/sei-institute/backend'
@@ -45,28 +46,24 @@ jobs:
       - name: Configure and restart service
         uses: appleboy/ssh-action@master
         with:
-          host: 37.27.247.208
-          username: root
-          password: gkjaRhMActfMatPW7nvd
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
           port: 22
           script: |
             cd /var/www/sei-institute/backend
-            npm ci --production
-            npx prisma generate
-            if [ ! -f .env ]; then
-              [ -f .env.example ] && cp .env.example .env || echo "" > .env
-              cat <<EOL >> .env
-              PORT=9000
-              DATABASE_URL="postgresql://sei_user:sei@localhost:5432/sei_institute?schema=public"
-              CLIENT_ENDPOINT="https://seiinstitute.com"
-              JWT_SECRET="${{ secrets.JWT_SECRET }}"
-              ACCESS_TOKEN_EXPIRES="1d"
-              REFRESH_TOKEN_EXPIRES="7d"
-              NODE_ENV="production"
-              POSTGRES_HOST_AUTH_METHOD="trust"
-              HUGGING_FACE_KEY="${{ secrets.HUGGING_FACE_KEY }}"
-              EOL
-            fi
+            # Always overwrite .env for freshness
+            cat << EOL > .env
+            PORT=9000
+            DATABASE_URL="postgresql://sei_user:sei@localhost:5432/sei_institute?schema=public"
+            CLIENT_ENDPOINT="https://seiinstitute.com"
+            JWT_SECRET="${{ secrets.JWT_SECRET }}"
+            ACCESS_TOKEN_EXPIRES="1d"
+            REFRESH_TOKEN_EXPIRES="7d"
+            NODE_ENV="production"
+            POSTGRES_HOST_AUTH_METHOD="trust"
+            HUGGING_FACE_KEY="${{ secrets.HUGGING_FACE_KEY }}"
+            EOL
             npx prisma migrate deploy || echo "Migrate failed, check logs"
             npm run prisma:seed || echo "Seed failed, check logs"
             pm2 restart sei-backend || pm2 start build/server.js --name sei-backend
