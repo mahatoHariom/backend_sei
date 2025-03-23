@@ -1,117 +1,59 @@
 import { FastifyInstance } from 'fastify'
 import { TYPES } from '@/types'
 import { PdfController } from '@/app/controllers/pdf-controller'
-import { createPdfSchema, pdfResponseSchema } from '@/domain/schemas/pdf-schema'
 import { pdfUpload } from '@/infrastructure/config/multer'
-// import { PdfController } from '@/app/controllers/pdf-controller'
-// import { upload } from '../config/multer-config'
-// import { createPdfSchema, pdfResponseSchema } from '@/domain/schemas/pdf-schemas'
 
 export default async function pdfRoutes(fastify: FastifyInstance) {
-  const pdfController = fastify.container.get<PdfController>(TYPES.PdfController)
+  const pdfController: PdfController = fastify.container.get(TYPES.PdfController)
 
-  // Admin routes
-  fastify.post(
-    '/admin/pdfs',
-    {
-      schema: {
-        tags: ['Admin'],
-        consumes: ['multipart/form-data'],
-        // body: createPdfSchema,
-        response: {
-          201: pdfResponseSchema
-        }
-      },
-      preHandler: pdfUpload.array('pdfs'),
-      onRequest: [fastify.authenticate, fastify.checkAdmin]
-    },
-    pdfController.uploadPdfs.bind(pdfController)
-  )
+  // Debug route to verify router setup
+  fastify.get('/pdf-routes-debug', async () => {
+    return {
+      message: 'PDF routes are configured correctly',
+      timestamp: new Date().toISOString()
+    }
+  })
 
-  // Get all PDFs with pagination
-  fastify.get(
-    '/pdfs',
-    {
-      schema: {
-        tags: ['PDFs'],
-        querystring: {
-          type: 'object',
-          properties: {
-            page: { type: 'number', default: 1 },
-            limit: { type: 'number', default: 10 }
-          }
-        },
-        response: {
-          200: {
-            type: 'object',
-            properties: {
-              data: { type: 'array', items: pdfResponseSchema },
-              pagination: {
-                type: 'object',
-                properties: {
-                  page: { type: 'number' },
-                  limit: { type: 'number' },
-                  total: { type: 'number' }
-                }
-              }
-            }
-          }
-        }
-      },
-      onRequest: [fastify.authenticate]
-    },
-    pdfController.getAllPdfs.bind(pdfController)
-  )
-
-  // Download single PDF
+  // IMPORTANT: Routes with ID parameters must come before more general routes
+  // PDF download route - this needs to be BEFORE `/pdfs/user`
   fastify.get(
     '/pdfs/:id/download',
     {
-      schema: {
-        tags: ['PDFs'],
-        params: {
-          type: 'object',
-          properties: {
-            id: { type: 'string' }
-          }
-        }
-      },
       onRequest: [fastify.authenticate]
     },
     pdfController.downloadPdf.bind(pdfController)
   )
 
-  // Bulk download PDFs
-  fastify.post(
-    '/pdfs/bulk-download',
+  // User routes - require authentication
+  fastify.get(
+    '/pdfs/user',
     {
-      schema: {
-        tags: ['PDFs'],
-        body: {
-          type: 'object',
-          properties: {
-            fileIds: { type: 'array', items: { type: 'string' } }
-          }
-        }
-      },
       onRequest: [fastify.authenticate]
     },
-    pdfController.bulkDownload.bind(pdfController)
+    pdfController.getUserPdfs.bind(pdfController)
   )
 
-  // Delete PDF (admin only)
+  // Admin routes - require admin role
+  fastify.post(
+    '/admin/pdfs',
+    {
+      onRequest: [fastify.authenticate, fastify.checkAdmin],
+      preHandler: pdfUpload.single('pdf')
+    },
+    pdfController.uploadPdf.bind(pdfController)
+  )
+
+  fastify.get(
+    '/admin/pdfs',
+    {
+      onRequest: [fastify.authenticate, fastify.checkAdmin]
+    },
+    pdfController.getPdfs.bind(pdfController)
+  )
+
   fastify.delete(
     '/admin/pdfs/:id',
     {
-      schema: {
-        tags: ['Admin'],
-        params: {
-          type: 'object',
-          properties: {
-            id: { type: 'string' }
-          }
-        }
-      },
       onRequest: [fastify.authenticate, fastify.checkAdmin]
     },
     pdfController.deletePdf.bind(pdfController)

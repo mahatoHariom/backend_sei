@@ -15,7 +15,39 @@ export default async function subjectRoutes(fastify: FastifyInstance) {
       schema: {
         tags: ['Subject'],
         response: {
-          200: subjectsResponseSchema
+          200: {
+            type: 'object',
+            properties: {
+              subjects: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    name: { type: 'string' },
+                    description: { type: ['string', 'null'] },
+                    createdAt: { type: 'string' },
+                    updatedAt: { type: ['string', 'null'] },
+                    users: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          userId: { type: 'string' }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              total: { type: 'number' },
+              page: { type: 'number' },
+              limit: { type: 'number' },
+              totalPages: { type: 'number' },
+              hasPreviousPage: { type: 'boolean' },
+              hasNextPage: { type: 'boolean' }
+            }
+          }
         }
       }
     },

@@ -29,6 +29,7 @@ export class PrismaPdfRepository implements IPdfRepository {
     skip?: number
     take?: number
     orderBy?: Prisma.PdfFileOrderByWithRelationInput
+    where?: Prisma.PdfFileWhereInput
   }): Promise<PdfFile[]> {
     return this.prisma.pdfFile.findMany({
       ...query,

@@ -3,6 +3,10 @@ import { inject, injectable } from 'inversify'
 import { TYPES } from '@/types'
 import { Contact, User } from '@prisma/client'
 import { AdminService } from '../services/admin-service'
+import ApiError from '@/infrastructure/config/ApiError'
+import { StatusCode } from '@/domain/constants/messages'
+// import { ApiError } from '@/utils/'
+// import { StatusCode } from '@/utils/status-code'
 
 @injectable()
 export class AdminController {
@@ -50,9 +54,15 @@ export class AdminController {
   }
 
   // Get all carousels
-  async getCarousels(request: FastifyRequest, reply: FastifyReply) {
-    const carousels = await this.adminService.getCarousels()
-    reply.status(200).send(carousels)
+  async getCarousels(
+    request: FastifyRequest<{
+      Querystring: { page?: number; limit?: number; search?: string }
+    }>,
+    reply: FastifyReply
+  ) {
+    const { page = 1, limit = 10, search } = request.query
+    const result = await this.adminService.getCarousels(page, limit, search)
+    reply.status(200).send(result)
   }
 
   async getEnrolledUsers(
@@ -173,34 +183,50 @@ export class AdminController {
     reply.status(200).send()
   }
 
+  async exportUsersAsCSV(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const csvData = await this.adminService.exportUsersAsCSV()
+
+    reply
+      .header('Content-Type', 'text/csv')
+      .header('Content-Disposition', 'attachment; filename=users.csv')
+      .send(csvData)
+  }
+
+  async importUsersFromCSV(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const file = request.file
+
+    if (!file) {
+      throw new ApiError('CSV file is required', StatusCode.BadRequest)
+    }
+    const csvBuffer = await file()
+    if (!csvBuffer) {
+      throw new ApiError('Error reading CSV file', StatusCode.BadRequest)
+    }
+
+    await this.adminService.importUsersFromCSV(await csvBuffer.toBuffer())
+
+    reply.status(200).send({ message: 'Users imported successfully' })
+  }
+
+  async getDashboardStats(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+    const stats = await this.adminService.getDashboardStats()
+    reply.status(200).send(stats)
+  }
+
   async createSubject(
     request: FastifyRequest<{
       Body: {
         name: string
         description?: string
-        difficulty?: string
-        duration?: string
-        imageUrl?: string
-        courseType?: string
-        tags?: string[]
-        badge?: string
-        students?: number
       }
     }>,
     reply: FastifyReply
   ) {
-    const { name, description, difficulty, duration, imageUrl, courseType, tags, badge, students } = request.body
+    const { name, description } = request.body
 
     await this.adminService.createSubject({
       name,
-      description,
-      difficulty,
-      duration,
-      imageUrl,
-      courseType,
-      tags,
-      badge,
-      students
+      description
     })
 
     reply.status(200).send()
@@ -211,32 +237,18 @@ export class AdminController {
       Body: {
         name?: string
         description?: string
-        difficulty?: string
-        duration?: string
-        imageUrl?: string
-        courseType?: string
-        tags?: string[]
-        badge?: string
-        students?: number
       }
       Params: { subjectId: string }
     }>,
     reply: FastifyReply
   ) {
-    const { name, description, difficulty, duration, imageUrl, courseType, tags, badge, students } = request.body
+    const { name, description } = request.body
     const { subjectId } = request.params
 
     await this.adminService.editSubject({
       subjectId,
       name,
-      description,
-      difficulty,
-      duration,
-      imageUrl,
-      courseType,
-      tags,
-      badge,
-      students
+      description
     })
 
     reply.status(200).send()

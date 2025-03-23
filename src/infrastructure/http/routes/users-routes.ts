@@ -60,7 +60,7 @@ export default async function userRoutes(fastify: FastifyInstance) {
         params: getEnrolledCourseSchema,
         response: {
           200: Type.Object({
-            courses: Type.Array(
+            subjects: Type.Array(
               Type.Object({
                 id: Type.String(),
                 name: Type.String(),
@@ -79,7 +79,7 @@ export default async function userRoutes(fastify: FastifyInstance) {
       },
       onRequest: fastify.authenticate
     },
-    userControllers.getUserCourses.bind(userControllers)
+    userControllers.getUserSubjects.bind(userControllers)
   )
 
   fastify.post(

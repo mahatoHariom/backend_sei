@@ -95,26 +95,12 @@ export const deleteContactParamsSchema = Type.Object({
 // Subject Schema
 export const createSubjectSchema = Type.Object({
   name: Type.String({ minLength: 1 }),
-  description: Type.Optional(Type.String()),
-  difficulty: Type.Optional(Type.String()),
-  duration: Type.Optional(Type.String()),
-  imageUrl: Type.Optional(Type.String()),
-  courseType: Type.Optional(Type.String()),
-  tags: Type.Optional(Type.Array(Type.String())),
-  badge: Type.Optional(Type.String()),
-  students: Type.Optional(Type.Number())
+  description: Type.Optional(Type.String())
 })
 
 export const editSubjectSchema = Type.Object({
   name: Type.Optional(Type.String()),
-  description: Type.Optional(Type.String()),
-  difficulty: Type.Optional(Type.String()),
-  duration: Type.Optional(Type.String()),
-  imageUrl: Type.Optional(Type.String()),
-  courseType: Type.Optional(Type.String()),
-  tags: Type.Optional(Type.Array(Type.String())),
-  badge: Type.Optional(Type.String()),
-  students: Type.Optional(Type.Number())
+  description: Type.Optional(Type.String())
 })
 
 export const deleteSubjectParamsSchema = Type.Object({

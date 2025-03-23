@@ -8,8 +8,14 @@ import { Subject } from '@prisma/client'
 export class SubjectController {
   constructor(@inject(TYPES.SubjectService) private subjectService: SubjectService) {}
 
-  async getAllSubjects(request: FastifyRequest, reply: FastifyReply): Promise<Subject[]> {
-    const subjects = await this.subjectService.getAllSubjects()
-    return reply.status(200).send(subjects)
+  async getAllSubjects(
+    request: FastifyRequest<{
+      Querystring: { page?: number; limit?: number; search?: string }
+    }>,
+    reply: FastifyReply
+  ) {
+    const { page, limit, search } = request.query
+    const result = await this.subjectService.getAllSubjects(page, limit, search)
+    return reply.status(200).send(result)
   }
 }

@@ -6,8 +6,20 @@ import { Subject } from '@prisma/client'
 @injectable()
 export class SubjectService {
   constructor(@inject(TYPES.ISubjectRepository) private subjectRepository: ISubjectRepository) {}
-  async getAllSubjects(): Promise<Subject[]> {
-    return this.subjectRepository.getAllSubjects()
+  async getAllSubjects(
+    page?: number,
+    limit?: number,
+    search?: string
+  ): Promise<{
+    subjects: Subject[]
+    total: number
+    page: number
+    limit: number
+    totalPages: number
+    hasPreviousPage: boolean
+    hasNextPage: boolean
+  }> {
+    return this.subjectRepository.getAllSubjects(page, limit, search)
   }
 
   async createSubject(data: SubjectCreateInput): Promise<Subject> {

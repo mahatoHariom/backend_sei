@@ -10,9 +10,9 @@ import multer from 'fastify-multer'
 import formBody from '@fastify/formbody'
 import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
-
+import cors from '@fastify/cors'
 import path from 'path'
-import CheckAdminRole from './app/middlewares/check-admin'
+// import CheckAdminRole from './app/middlewares/check-admin'
 
 /**
  * Creates and configures the Fastify application
@@ -41,6 +41,13 @@ const createApp = async (): Promise<FastifyInstance> => {
     // Register all middlewares
     await registerMiddlewares(app)
 
+    await app.register(cors, {
+      origin: ['https://seiinstitute.com', 'http://localhost:3000'],
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
+    })
+
     // Decorate app with DI container
     app.decorate('container', container)
 
@@ -49,7 +56,7 @@ const createApp = async (): Promise<FastifyInstance> => {
       prefix: '/uploads', // URL prefix for accessing files
       decorateReply: true,
       setHeaders: (res) => {
-        res.setHeader('Access-Control-Allow-Origin', 'https://seiinstitute.com')
+        res.setHeader('Access-Control-Allow-Origin', 'http://localhost:3000')
         res.setHeader('Access-Control-Allow-Credentials', 'true')
         res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
       }

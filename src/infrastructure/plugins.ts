@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import fastifyJwt from '@fastify/jwt'
 import fastifyCookie from '@fastify/cookie'
-import cors from '@fastify/cors'
+
 import helmet from '@fastify/helmet'
 import swagger from '@fastify/swagger'
 import swaggerUi from '@fastify/swagger-ui'
@@ -12,12 +12,12 @@ import { swaggerUiOptions } from './config/swagger'
 
 export async function registerPlugins(app: FastifyInstance) {
   // Security plugins
-  await app.register(cors, {
-    credentials: true,
-    origin: ['https://seiinstitute.com', 'http://localhost:3000'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
-  })
+  // await app.register(cors, {
+  //   credentials: true,
+  //   origin: ['https://seiinstitute.com', 'http://localhost:3000/', 'http://localhost:3000']
+  //   // methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  //   // allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With']
+  // })
 
   await app.register(helmet)
 

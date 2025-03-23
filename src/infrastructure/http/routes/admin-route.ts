@@ -13,7 +13,7 @@ import {
   getAllUsersResponseSchema,
   getEnrolledUsersResponseSchema
 } from '@/domain/schemas/admin-schemas'
-import { carouselImageUpload } from '@/infrastructure/config/multer'
+import { carouselImageUpload, pdfUpload } from '@/infrastructure/config/multer'
 
 export default async function adminRoutes(fastify: FastifyInstance) {
   const adminController = fastify.container.get<AdminController>(TYPES.AdminController)
@@ -94,17 +94,36 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     {
       schema: {
         tags: ['Admin'],
+        querystring: {
+          type: 'object',
+          properties: {
+            page: { type: 'number', default: 1 },
+            limit: { type: 'number', default: 10 },
+            search: { type: 'string' }
+          }
+        },
         response: {
           200: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                id: { type: 'string' },
-                imageUrl: { type: 'string' },
-                createdAt: { type: 'string', format: 'date-time' },
-                updatedAt: { type: 'string', format: 'date-time' }
-              }
+            type: 'object',
+            properties: {
+              carousels: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    id: { type: 'string' },
+                    imageUrl: { type: 'string' },
+                    createdAt: { type: 'string', format: 'date-time' },
+                    updatedAt: { type: 'string', format: 'date-time' }
+                  }
+                }
+              },
+              total: { type: 'number' },
+              page: { type: 'number' },
+              limit: { type: 'number' },
+              totalPages: { type: 'number' },
+              hasPreviousPage: { type: 'boolean' },
+              hasNextPage: { type: 'boolean' }
             }
           }
         }
@@ -118,6 +137,14 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     {
       schema: {
         tags: ['Admin'],
+        querystring: {
+          type: 'object',
+          properties: {
+            page: { type: 'number', default: 1 },
+            limit: { type: 'number', default: 10 },
+            search: { type: 'string' }
+          }
+        },
         response: {
           200: getAllUsersResponseSchema
         }
@@ -132,6 +159,14 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     {
       schema: {
         tags: ['Admin'],
+        querystring: {
+          type: 'object',
+          properties: {
+            page: { type: 'number', default: 1 },
+            limit: { type: 'number', default: 10 },
+            search: { type: 'string' }
+          }
+        },
         response: {
           200: getAllContactsResponseSchema
         }
@@ -231,5 +266,91 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       onRequest: [fastify.authenticate, fastify.checkAdmin]
     },
     adminController.deleteUser.bind(adminController)
+  )
+
+  // Export users as CSV
+  fastify.get(
+    '/admin/users/export-csv',
+    {
+      schema: {
+        tags: ['Admin'],
+        response: {
+          200: { type: 'string' }
+        }
+      },
+      onRequest: [fastify.authenticate, fastify.checkAdmin]
+    },
+    adminController.exportUsersAsCSV.bind(adminController)
+  )
+
+  // Import users from CSV
+  fastify.post(
+    '/admin/users/import-csv',
+    {
+      schema: {
+        tags: ['Admin'],
+        consumes: ['multipart/form-data'],
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              message: { type: 'string' }
+            }
+          }
+        }
+      },
+      onRequest: [fastify.authenticate, fastify.checkAdmin],
+      preHandler: pdfUpload.single('csv')
+    },
+    adminController.importUsersFromCSV.bind(adminController)
+  )
+
+  // Get admin dashboard statistics
+  fastify.get(
+    '/admin/dashboard/stats',
+    {
+      schema: {
+        tags: ['Admin'],
+        response: {
+          200: {
+            type: 'object',
+            properties: {
+              totalUsers: { type: 'number' },
+              totalEnrollments: { type: 'number' },
+              totalSubjects: { type: 'number' },
+              totalContacts: { type: 'number' },
+              recentUsers: {
+                type: 'array',
+                items: {
+                  type: 'object'
+                }
+              },
+              usersByRole: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    role: { type: 'string' },
+                    count: { type: 'number' }
+                  }
+                }
+              },
+              monthlySignups: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    month: { type: 'string' },
+                    count: { type: 'number' }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      onRequest: [fastify.authenticate, fastify.checkAdmin]
+    },
+    adminController.getDashboardStats.bind(adminController)
   )
 }

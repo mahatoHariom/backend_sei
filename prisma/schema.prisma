@@ -54,13 +54,6 @@ model Subject {
     id          String        @id @default(uuid())
     name        String        @unique
     description String?
-    difficulty  String? // "Beginner", "Intermediate", "Advanced"
-    duration    String? // e.g. "8 weeks"
-    imageUrl    String? // Course cover image URL
-    courseType  String? // e.g. "Certificate", "Diploma", "Workshop"
-    tags        String[] // Array of tags like "Technology", "Programming"
-    badge       String? // Status indicator: e.g. "New", "Featured", "Popular"
-    students    Int? // Number of enrolled students
     createdAt   DateTime      @default(now())
     updatedAt   DateTime      @updatedAt
     users       UserSubject[]

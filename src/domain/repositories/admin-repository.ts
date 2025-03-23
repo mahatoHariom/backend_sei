@@ -29,10 +29,50 @@ export class PrismaAdminRepository implements IAdminRepository {
     })
   }
 
-  async getCarousels(): Promise<Carousel[]> {
-    return this.prisma.carousel.findMany({
-      orderBy: { createdAt: 'desc' }
-    })
+  async getCarousels(
+    page: number = 1,
+    limit: number = 10,
+    search?: string
+  ): Promise<{
+    carousels: Carousel[]
+    total: number
+    page: number
+    limit: number
+    totalPages: number
+    hasPreviousPage: boolean
+    hasNextPage: boolean
+  }> {
+    const skip = (page - 1) * limit
+
+    const whereClause = search
+      ? {
+          id: { contains: search, mode: 'insensitive' as Prisma.QueryMode }
+        }
+      : {}
+
+    const [carousels, total] = await Promise.all([
+      this.prisma.carousel.findMany({
+        where: whereClause,
+        skip,
+        take: Number(limit),
+        orderBy: { createdAt: 'desc' }
+      }),
+      this.prisma.carousel.count({
+        where: whereClause
+      })
+    ])
+
+    const totalPages = Math.ceil(total / limit)
+
+    return {
+      carousels,
+      total,
+      page,
+      limit,
+      totalPages,
+      hasPreviousPage: page > 1,
+      hasNextPage: page < totalPages
+    }
   }
 
   async getEnrolledUsers(
@@ -268,38 +308,11 @@ export class PrismaAdminRepository implements IAdminRepository {
     })
   }
 
-  async createSubject({
-    name,
-    description,
-    difficulty,
-    duration,
-    imageUrl,
-    courseType,
-    tags,
-    badge,
-    students
-  }: {
-    name: string
-    description?: string
-    difficulty?: string
-    duration?: string
-    imageUrl?: string
-    courseType?: string
-    tags?: string[]
-    badge?: string
-    students?: number
-  }): Promise<void> {
+  async createSubject({ name, description }: { name: string; description?: string }): Promise<void> {
     await this.prisma.subject.create({
       data: {
         name,
-        description,
-        difficulty,
-        duration,
-        imageUrl,
-        courseType,
-        tags,
-        badge,
-        students
+        description
       }
     })
   }
@@ -323,25 +336,11 @@ export class PrismaAdminRepository implements IAdminRepository {
   async editSubject({
     subjectId,
     name,
-    description,
-    difficulty,
-    duration,
-    imageUrl,
-    courseType,
-    tags,
-    badge,
-    students
+    description
   }: {
     subjectId: string
     name?: string
     description?: string
-    difficulty?: string
-    duration?: string
-    imageUrl?: string
-    courseType?: string
-    tags?: string[]
-    badge?: string
-    students?: number
   }): Promise<void> {
     await this.prisma.subject.update({
       where: {
@@ -349,15 +348,150 @@ export class PrismaAdminRepository implements IAdminRepository {
       },
       data: {
         ...(name !== undefined && { name }),
-        ...(description !== undefined && { description }),
-        ...(difficulty !== undefined && { difficulty }),
-        ...(duration !== undefined && { duration }),
-        ...(imageUrl !== undefined && { imageUrl }),
-        ...(courseType !== undefined && { courseType }),
-        ...(tags !== undefined && { tags }),
-        ...(badge !== undefined && { badge }),
-        ...(students !== undefined && { students })
+        ...(description !== undefined && { description })
       }
     })
+  }
+
+  async getAllUsersForExport(): Promise<User[]> {
+    return this.prisma.user.findMany({
+      orderBy: {
+        createdAt: 'desc'
+      }
+    })
+  }
+
+  async importUsers(users: any[]): Promise<void> {
+    // Create a transaction to handle bulk operations
+    await this.prisma.$transaction(async (prisma) => {
+      for (const userData of users) {
+        // Check if user exists (by email)
+        const existingUser = await prisma.user.findUnique({
+          where: { email: userData.email }
+        })
+
+        if (existingUser) {
+          // Update existing user
+          await prisma.user.update({
+            where: { id: existingUser.id },
+            data: {
+              ...userData,
+              role: existingUser.role, // Preserve role
+              password: existingUser.password, // Preserve password
+              updatedAt: new Date()
+            }
+          })
+        } else {
+          // Create new user with a temp password (to be reset)
+          const tempPassword = await this.generateRandomPassword()
+
+          await prisma.user.create({
+            data: {
+              ...userData,
+              role: 'USER', // Default role
+              password: tempPassword,
+              isVerified: false
+            }
+          })
+        }
+      }
+    })
+  }
+
+  // Helper method to generate random password for new imported users
+  private async generateRandomPassword(): Promise<string> {
+    // In a real implementation, this would involve hashing
+    return Math.random().toString(36).slice(-10)
+  }
+
+  async getDashboardStats(): Promise<{
+    totalUsers: number
+    totalEnrollments: number
+    totalSubjects: number
+    totalContacts: number
+    recentUsers: User[]
+    usersByRole: Array<{ role: string; count: number }>
+    monthlySignups: Array<{ month: string; count: number }>
+  }> {
+    // Get total counts
+    const [totalUsers, totalSubjects, totalContacts] = await Promise.all([
+      this.prisma.user.count(),
+      this.prisma.subject.count(),
+      this.prisma.contact.count()
+    ])
+
+    // Count enrollments (users with subjects)
+    const totalEnrollments = await this.prisma.userSubject.count()
+
+    // Get recent users
+    const recentUsers = await this.prisma.user.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 5
+    })
+
+    // Get user count by role
+    const usersByRole = await this.prisma.user.groupBy({
+      by: ['role'],
+      _count: {
+        role: true
+      }
+    })
+
+    // Format user role data
+    const formattedUsersByRole = usersByRole.map((item) => ({
+      role: item.role,
+      count: item._count.role
+    }))
+
+    // Get monthly signups for the last 6 months
+    const sixMonthsAgo = new Date()
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6)
+
+    const recentSignups = await this.prisma.user.findMany({
+      where: {
+        createdAt: {
+          gte: sixMonthsAgo
+        }
+      },
+      select: {
+        createdAt: true
+      }
+    })
+
+    // Aggregate signups by month
+    const signupsByMonth = new Map<string, number>()
+
+    // Initialize with last 6 months
+    for (let i = 0; i < 6; i++) {
+      const date = new Date()
+      date.setMonth(date.getMonth() - i)
+      const monthYear = `${date.toLocaleString('default', { month: 'short' })} ${date.getFullYear()}`
+      signupsByMonth.set(monthYear, 0)
+    }
+
+    // Count signups by month
+    recentSignups.forEach((user) => {
+      const date = new Date(user.createdAt)
+      const monthYear = `${date.toLocaleString('default', { month: 'short' })} ${date.getFullYear()}`
+
+      if (signupsByMonth.has(monthYear)) {
+        signupsByMonth.set(monthYear, signupsByMonth.get(monthYear)! + 1)
+      }
+    })
+
+    // Convert to array and reverse to get chronological order
+    const monthlySignups = Array.from(signupsByMonth.entries())
+      .map(([month, count]) => ({ month, count }))
+      .reverse()
+
+    return {
+      totalUsers,
+      totalEnrollments,
+      totalSubjects,
+      totalContacts,
+      recentUsers,
+      usersByRole: formattedUsersByRole,
+      monthlySignups
+    }
   }
 }

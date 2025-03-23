@@ -4,8 +4,9 @@ import userRoutes from './http/routes/users-routes'
 import contactRoutes from './http/routes/contact-route'
 import subjectRoutes from './http/routes/subject-route'
 import adminRoutes from './http/routes/admin-route'
-import pdfRoutes from './http/routes/pdf-route'
+// import pdfRoutes from './http/routes/pdf-route'
 import practiceRoutes from './http/routes/practise-route'
+import pdfRoutes from './http/routes/pdf-route'
 
 export async function registerRoutes(app: FastifyInstance) {
   app.register(authRoutes, { prefix: '/api/v1/auth' })

@@ -3,33 +3,31 @@ import { Subject } from '@prisma/client'
 export interface SubjectCreateInput {
   name: string
   description?: string
-  difficulty?: string
-  duration?: string
-  imageUrl?: string
-  courseType?: string
-  tags?: string[]
-  badge?: string
-  students?: number
 }
 
 export interface SubjectUpdateInput {
   name?: string
   description?: string
-  difficulty?: string
-  duration?: string
-  imageUrl?: string
-  courseType?: string
-  tags?: string[]
-  badge?: string
-  students?: number
 }
 
 export interface ISubjectRepository {
-  getAllSubjects(): Promise<Subject[]>
+  getAllSubjects(
+    page?: number,
+    limit?: number,
+    search?: string
+  ): Promise<{
+    subjects: Subject[]
+    total: number
+    page: number
+    limit: number
+    totalPages: number
+    hasPreviousPage: boolean
+    hasNextPage: boolean
+  }>
 
-  // createSubject(data: SubjectCreateInput): Promise<Subject>
+  createSubject(data: SubjectCreateInput): Promise<Subject>
 
-  // updateSubject(id: string, data: SubjectUpdateInput): Promise<Subject>
+  updateSubject(id: string, data: SubjectUpdateInput): Promise<Subject>
 
   createUserSubjectEnrollment(userId: string, subjectId: string): Promise<void>
 

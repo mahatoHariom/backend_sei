@@ -49,20 +49,59 @@ export class PrismaUserRepository implements IUserRepository {
       fatherName?: string
       parentContact?: string
       schoolCollegeName?: string
+      subjectIds?: string[]
     }
   ): Promise<User> {
-    return await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        fullName: data.fullName,
-        email: data.email,
-        phoneNumber: data.phoneNumber,
-        address: data.address,
-        motherName: data.motherName,
-        fatherName: data.fatherName,
-        parentContact: data.parentContact,
-        schoolCollegeName: data.schoolCollegeName
+    // Extract subjectIds for separate processing
+    const { subjectIds, ...userData } = data
+
+    // Start a transaction to handle user update and subject enrollments together
+    return await this.prisma.$transaction(async (tx) => {
+      // First update the user profile data
+      const updatedUser = await tx.user.update({
+        where: { id: userId },
+        data: userData
+      })
+
+      // If subjectIds are provided, update user's subject enrollments
+      if (subjectIds) {
+        // First, get all current subject enrollments
+        const currentEnrollments = await tx.userSubject.findMany({
+          where: { userId },
+          select: { subjectId: true }
+        })
+
+        const currentSubjectIds = currentEnrollments.map((e) => e.subjectId)
+
+        // Find subjects to remove (in current but not in new list)
+        const subjectsToRemove = currentSubjectIds.filter((id) => !subjectIds.includes(id))
+
+        // Find subjects to add (in new list but not in current)
+        const subjectsToAdd = subjectIds.filter((id) => !currentSubjectIds.includes(id))
+
+        // Remove enrollments no longer in the list
+        if (subjectsToRemove.length > 0) {
+          await tx.userSubject.deleteMany({
+            where: {
+              userId,
+              subjectId: { in: subjectsToRemove }
+            }
+          })
+        }
+
+        // Add new enrollments
+        if (subjectsToAdd.length > 0) {
+          await Promise.all(
+            subjectsToAdd.map((subjectId) =>
+              tx.userSubject.create({
+                data: { userId, subjectId }
+              })
+            )
+          )
+        }
       }
+
+      return updatedUser
     })
   }
 

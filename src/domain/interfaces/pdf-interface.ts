@@ -1,4 +1,4 @@
-import { PdfFile, Prisma, User, UserDetail } from '@prisma/client'
+import { PdfFile, Prisma } from '@prisma/client'
 
 export interface IPdfRepository {
   create(data: Prisma.PdfFileCreateInput): Promise<PdfFile>
@@ -7,6 +7,7 @@ export interface IPdfRepository {
     skip?: number
     take?: number
     orderBy?: Prisma.PdfFileOrderByWithRelationInput
+    where?: Prisma.PdfFileWhereInput
   }): Promise<PdfFile[]>
   incrementDownloadCount(id: string): Promise<void>
   delete(id: string): Promise<PdfFile>

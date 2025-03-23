@@ -16,6 +16,7 @@ export interface IUserRepository {
       fatherName?: string
       parentContact?: string
       schoolCollegeName?: string
+      subjectIds?: string[]
     }
   ): Promise<User>
 }

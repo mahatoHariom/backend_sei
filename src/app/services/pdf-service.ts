@@ -1,122 +1,166 @@
-import { injectable, inject } from 'inversify'
+import { inject, injectable } from 'inversify'
 import { TYPES } from '@/types'
-import { unlink } from 'fs/promises'
-// import path from 'path'
-// import { ApiError } from '@/infrastructure/config/ApiError'
-import { Messages, StatusCode } from '@/domain/constants/messages'
-import archiver from 'archiver'
-import { createReadStream } from 'fs'
-import { PrismaPdfRepository } from '@/domain/repositories/pdf-repository'
-import ApiError from '@/infrastructure/config/ApiError'
+import { PdfFile, Prisma } from '@prisma/client'
 import { IPdfRepository } from '@/domain/interfaces/pdf-interface'
+import fs from 'fs'
+import path from 'path'
 
 @injectable()
 export class PdfService {
   constructor(@inject(TYPES.IPdfRepository) private pdfRepository: IPdfRepository) {}
 
-  async uploadPdf(
-    file: {
-      fieldname: string
-      originalname: string
-      encoding: string
-      mimetype: string
-      destination: string
-      filename: string
-      path: string
-      size: number
-    },
-    userId: string,
-    title: string,
+  async createPdf(data: {
+    title: string
     description?: string
-  ): Promise<any> {
+    filename: string
+    path: string
+    mimetype: string
+    size: number
+    userId: string
+  }): Promise<PdfFile> {
+    const { userId, ...pdfData } = data
+
     return this.pdfRepository.create({
-      title,
-      description,
-      filename: file.originalname,
-      path: file.path,
-      mimetype: file.mimetype,
-      size: file.size,
+      ...pdfData,
       uploadedBy: {
         connect: { id: userId }
       }
     })
   }
 
-  async getAllPdfs(page = 1, limit = 10, search?: string) {
-    const skip = (page - 1) * limit
+  async getPdf(id: string): Promise<PdfFile | null> {
+    return this.pdfRepository.findById(id)
+  }
 
-    const filters = search
-      ? {
-          OR: [
-            { title: { contains: search, mode: 'insensitive' as const } },
-            { description: { contains: search, mode: 'insensitive' as const } }
-          ]
-        }
-      : {}
+  async getPdfs(
+    page: number = 1,
+    limit: number = 10,
+    search?: string
+  ): Promise<{
+    pdfs: PdfFile[]
+    total: number
+    page: number
+    limit: number
+    totalPages: number
+    hasPreviousPage: boolean
+    hasNextPage: boolean
+  }> {
+    // Ensure page and limit are integers
+    const parsedPage = typeof page === 'string' ? parseInt(page, 10) : page
+    const parsedLimit = typeof limit === 'string' ? parseInt(limit, 10) : limit
 
+    const skip = (parsedPage - 1) * parsedLimit
+    const take = parsedLimit
+
+    // Create filter conditions based on search term
+    const where: Prisma.PdfFileWhereInput = {}
+    if (search) {
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { filename: { contains: search, mode: 'insensitive' } }
+      ]
+    }
+
+    // Find PDFs with pagination
     const pdfs = await this.pdfRepository.findMany({
       skip,
-      take: limit,
-      orderBy: { createdAt: 'desc' },
-      ...filters
+      take,
+      where,
+      orderBy: { createdAt: 'desc' }
     })
 
-    const total = await this.pdfRepository.count(filters)
+    // Count total matching PDFs for pagination
+    const total = await this.pdfRepository.count(where)
+    const totalPages = Math.ceil(total / parsedLimit)
 
     return {
       pdfs,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-        hasPreviousPage: page > 1,
-        hasNextPage: page * limit < total
-      }
+      total,
+      page: parsedPage,
+      limit: parsedLimit,
+      totalPages,
+      hasPreviousPage: parsedPage > 1,
+      hasNextPage: parsedPage < totalPages
     }
   }
 
-  async downloadPdf(id: string) {
-    const pdf = await this.pdfRepository.findById(id)
-    if (!pdf) {
-      throw new ApiError(Messages.FILE_NOT_FOUND, StatusCode.NotFound)
+  async getUserPdfs(
+    page: number = 1,
+    limit: number = 10,
+    search?: string
+  ): Promise<{
+    pdfs: PdfFile[]
+    total: number
+    page: number
+    limit: number
+    totalPages: number
+    hasPreviousPage: boolean
+    hasNextPage: boolean
+  }> {
+    // Ensure page and limit are integers
+    const parsedPage = typeof page === 'string' ? parseInt(page, 10) : page
+    const parsedLimit = typeof limit === 'string' ? parseInt(limit, 10) : limit
+
+    const skip = (parsedPage - 1) * parsedLimit
+    const take = parsedLimit
+
+    // Create filter conditions based on search term
+    const where: Prisma.PdfFileWhereInput = {}
+    if (search) {
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { filename: { contains: search, mode: 'insensitive' } }
+      ]
     }
 
+    // Find PDFs with pagination
+    const pdfs = await this.pdfRepository.findMany({
+      skip,
+      take,
+      where,
+      orderBy: { createdAt: 'desc' }
+    })
+
+    // Count total matching PDFs for pagination
+    const total = await this.pdfRepository.count(where)
+    const totalPages = Math.ceil(total / parsedLimit)
+
+    return {
+      pdfs,
+      total,
+      page: parsedPage,
+      limit: parsedLimit,
+      totalPages,
+      hasPreviousPage: parsedPage > 1,
+      hasNextPage: parsedPage < totalPages
+    }
+  }
+
+  async incrementDownloadCount(id: string): Promise<void> {
     await this.pdfRepository.incrementDownloadCount(id)
-    return pdf
   }
 
-  async bulkDownload(fileIds: string[]) {
-    const archive = archiver('zip')
-
-    for (const id of fileIds) {
-      const pdf = await this.pdfRepository.findById(id)
-      if (!pdf) continue
-
-      archive.append(createReadStream(pdf.path), { name: pdf.filename })
-      await this.pdfRepository.incrementDownloadCount(id)
-    }
-
-    await archive.finalize()
-    return archive
-  }
-
-  async deletePdf(id: string, userId: string) {
+  async deletePdf(id: string): Promise<void> {
+    // First get the PDF to find the file path
     const pdf = await this.pdfRepository.findById(id)
-
     if (!pdf) {
-      throw new ApiError(Messages.FILE_NOT_FOUND, StatusCode.NotFound)
+      throw new Error('PDF file not found')
     }
 
-    if (pdf.userId !== userId) {
-      throw new ApiError(Messages.USER_NOT_AUTHENTICATED, StatusCode.Forbidden)
-    }
-
+    // Delete from filesystem
     try {
-      await unlink(pdf.path)
-      await this.pdfRepository.delete(id)
+      const fullPath = path.join(process.cwd(), pdf.path)
+      if (fs.existsSync(fullPath)) {
+        fs.unlinkSync(fullPath)
+      }
     } catch (error) {
-      throw new ApiError(Messages.FILE_DELETE_ERROR, StatusCode.InternalServerError)
+      console.error('Failed to delete PDF file from filesystem:', error)
+      // Continue with DB deletion even if file deletion fails
     }
+
+    // Delete from database
+    await this.pdfRepository.delete(id)
   }
 }

@@ -5,16 +5,9 @@ import { userBaseSchema } from './user-schema'
 export const subjectSchema = Type.Object({
   id: Type.String(),
   name: Type.String({ minLength: 1 }),
-  description: Type.Optional(Type.String()),
-  difficulty: Type.Optional(Type.String()),
-  duration: Type.Optional(Type.String()),
-  imageUrl: Type.Optional(Type.String()),
-  courseType: Type.Optional(Type.String()),
-  tags: Type.Optional(Type.Array(Type.String())),
-  badge: Type.Optional(Type.String()),
-  students: Type.Optional(Type.Number()),
+  description: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   createdAt: Type.String({ format: 'date-time' }),
-  updatedAt: Type.Optional(Type.String({ format: 'date-time' })),
+  updatedAt: Type.Optional(Type.Union([Type.String({ format: 'date-time' }), Type.Null()])),
   users: Type.Array(
     Type.Object({
       userId: Type.String()
@@ -25,14 +18,7 @@ export const subjectSchema = Type.Object({
 // Input schema for creating or updating a subject
 export const subjectInputSchema = Type.Object({
   name: Type.String({ minLength: 1 }),
-  description: Type.Optional(Type.String()),
-  difficulty: Type.Optional(Type.String()),
-  duration: Type.Optional(Type.String()),
-  imageUrl: Type.Optional(Type.String()),
-  courseType: Type.Optional(Type.String()),
-  tags: Type.Optional(Type.Array(Type.String())),
-  badge: Type.Optional(Type.String()),
-  students: Type.Optional(Type.Number())
+  description: Type.Optional(Type.Union([Type.String(), Type.Null()]))
 })
 
 // Response schema for a single subject

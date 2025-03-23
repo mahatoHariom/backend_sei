@@ -52,26 +52,33 @@ export class UserControllers {
   }
 
   async enrollInSubject(request: FastifyRequest<{ Body: EnrollSubjectInput }>, reply: FastifyReply) {
-    const { userId, subjectId } = request.body
+    try {
+      const { userId, subjectId } = request.body
+      console.log('DEPRECATED - enrollInSubject: Use edit-profile with subjectIds array instead')
 
-    const subject = await this.subjectService.getSubjectById(subjectId)
-    if (!subject) {
-      return reply.status(400).send({ message: 'Subject not found' })
+      // Check if user exists using the auth repository
+      const user = await this.authRepository.findById(userId)
+      if (!user) {
+        return reply.status(404).send({ message: 'User not found' })
+      }
+
+      // Get current user subjects
+      const userSubjectsResult = await this.subjectService.getUserSubjects(userId, 1, 1000)
+      const existingSubjectIds = userSubjectsResult.subjects.map((subject: { id: string }) => subject.id)
+
+      // Add new subject if not already enrolled
+      if (!existingSubjectIds.includes(subjectId)) {
+        const newSubjectIds = [...existingSubjectIds, subjectId]
+
+        // Update user with new subject IDs using the updateUserProfile method
+        await this.userServices.updateUserProfile(userId, { subjectIds: newSubjectIds })
+      }
+
+      return reply.status(201).send()
+    } catch (error) {
+      console.error('Error in enrollInSubject:', error)
+      return reply.status(500).send({ error: 'An error occurred while enrolling in subject' })
     }
-
-    const user = await this.authRepository.findById(userId)
-    if (!user) {
-      return reply.status(400).send({ message: 'User not found' })
-    }
-
-    const existingEnrollment = await this.subjectService.checkEnrollment(userId, subjectId)
-    if (existingEnrollment) {
-      return reply.status(400).send({ message: 'User already enrolled in this subject' })
-    }
-
-    await this.subjectService.enrollUserInSubject(userId, subjectId)
-
-    return reply.status(200).send()
   }
 
   async changePassword(request: FastifyRequest<{ Body: ChangePasswordInput }>, reply: FastifyReply) {
@@ -86,7 +93,7 @@ export class UserControllers {
     return reply.status(200).send()
   }
 
-  async getUserCourses(
+  async getUserSubjects(
     request: FastifyRequest<{
       Params: { userId: string }
       Querystring: { page?: number; limit?: number; search?: string }
@@ -94,27 +101,42 @@ export class UserControllers {
     reply: FastifyReply
   ) {
     const { userId } = request.params
-    const { page = 1, limit = 10, search } = request.query
+    const { page = 1, limit = 10, search = '' } = request.query
 
-    const {
-      subjects,
-      total,
-      page: currentPage,
-      limit: currentLimit,
-      totalPages,
-      hasPreviousPage,
-      hasNextPage
-    } = await this.subjectService.getUserSubjects(userId, page, limit, search)
+    console.log(`Fetching subjects for user ${userId} with page=${page}, limit=${limit}, search=${search}`)
 
-    return reply.status(200).send({
-      courses: subjects,
-      total,
-      page: currentPage,
-      limit: currentLimit,
-      totalPages,
-      hasPreviousPage,
-      hasNextPage
-    })
+    const result = await this.subjectService.getUserSubjects(userId, page, limit, search)
+
+    console.log(
+      'User subjects result from service:',
+      JSON.stringify(
+        {
+          subjectsCount: result.subjects.length,
+          firstSubject: result.subjects[0],
+          pagination: {
+            total: result.total,
+            page: result.page,
+            limit: result.limit,
+            totalPages: result.totalPages
+          }
+        },
+        null,
+        2
+      )
+    )
+
+    const response = {
+      subjects: result.subjects,
+      total: result.total,
+      page: result.page,
+      limit: result.limit,
+      totalPages: result.totalPages,
+      hasPreviousPage: result.hasPreviousPage,
+      hasNextPage: result.hasNextPage
+    }
+
+    console.log('Sending subjects response with key "subjects"')
+    return reply.status(200).send(response)
   }
 
   async editProfile(
@@ -128,32 +150,53 @@ export class UserControllers {
         fatherName?: string
         parentContact?: string
         schoolCollegeName?: string
+        subjectIds?: string[]
       }
     }>,
     reply: FastifyReply
   ) {
-    const { fullName, email, phoneNumber, address, motherName, fatherName, parentContact, schoolCollegeName } =
-      request.body
+    try {
+      const {
+        fullName,
+        email,
+        phoneNumber,
+        address,
+        motherName,
+        fatherName,
+        parentContact,
+        schoolCollegeName,
+        subjectIds
+      } = request.body
 
-    const userId = request.user?.id
+      console.log('Edit profile request body:', request.body)
+      if (subjectIds) {
+        console.log('Updating subject IDs:', subjectIds)
+      }
 
-    if (!userId) {
-      throw new ApiError(Messages.INVALID_CREDENTIAL, StatusCode.Unauthorized)
+      const userId = request.user?.id
+
+      if (!userId) {
+        throw new ApiError(Messages.INVALID_CREDENTIAL, StatusCode.Unauthorized)
+      }
+
+      // Update user with all fields
+      const updatedUser = await this.userServices.updateUserProfile(userId, {
+        fullName,
+        email,
+        phoneNumber,
+        address,
+        motherName,
+        fatherName,
+        parentContact,
+        schoolCollegeName,
+        subjectIds
+      })
+
+      return reply.status(200).send(updatedUser)
+    } catch (error) {
+      console.error('Error in editProfile:', error)
+      throw error
     }
-
-    // Update user with all fields
-    const updatedUser = await this.userServices.updateUserProfile(userId, {
-      fullName,
-      email,
-      phoneNumber,
-      address,
-      motherName,
-      fatherName,
-      parentContact,
-      schoolCollegeName
-    })
-
-    return reply.status(200).send(updatedUser)
   }
 
   async updateProfilePic(request: FastifyRequest, reply: FastifyReply) {
@@ -190,25 +233,30 @@ export class UserControllers {
   }
 
   async unenrollFromSubject(request: FastifyRequest<{ Body: EnrollSubjectInput }>, reply: FastifyReply) {
-    const { userId, subjectId } = request.body
+    try {
+      const { userId, subjectId } = request.body
+      console.log('DEPRECATED - unenrollFromSubject: Use edit-profile with subjectIds array instead')
 
-    const subject = await this.subjectService.getSubjectById(subjectId)
-    if (!subject) {
-      return reply.status(400).send({ message: 'Subject not found' })
+      // Check if user exists using the auth repository
+      const user = await this.authRepository.findById(userId)
+      if (!user) {
+        return reply.status(404).send({ message: 'User not found' })
+      }
+
+      // Get current user subjects
+      const userSubjectsResult = await this.subjectService.getUserSubjects(userId, 1, 1000)
+      const existingSubjectIds = userSubjectsResult.subjects.map((subject: { id: string }) => subject.id)
+
+      // Remove subject ID
+      const newSubjectIds = existingSubjectIds.filter((id: string) => id !== subjectId)
+
+      // Update user with new subject IDs using the updateUserProfile method
+      await this.userServices.updateUserProfile(userId, { subjectIds: newSubjectIds })
+
+      return reply.status(200).send()
+    } catch (error) {
+      console.error('Error in unenrollFromSubject:', error)
+      return reply.status(500).send({ error: 'An error occurred while unenrolling from subject' })
     }
-
-    const user = await this.authRepository.findById(userId)
-    if (!user) {
-      return reply.status(400).send({ message: 'User not found' })
-    }
-
-    const existingEnrollment = await this.subjectService.checkEnrollment(userId, subjectId)
-    if (!existingEnrollment) {
-      return reply.status(400).send({ message: 'User is not enrolled in this subject' })
-    }
-
-    await this.subjectService.unenrollUserFromSubject(userId, subjectId)
-
-    return reply.status(200).send()
   }
 }

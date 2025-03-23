@@ -29,6 +29,7 @@ export class UserServices {
       fatherName?: string
       parentContact?: string
       schoolCollegeName?: string
+      subjectIds?: string[]
     }
   ): Promise<User> {
     return await this.userRepository.updateUserProfile(userId, data)

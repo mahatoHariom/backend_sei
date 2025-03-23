@@ -6,7 +6,19 @@ export interface IAdminRepository {
   updateCarousel(data: { id: string; imageUrl: string }): Promise<Carousel>
 
   deleteCarousel({ id }: { id: string }): Promise<void>
-  getCarousels(): Promise<Carousel[]>
+  getCarousels(
+    page?: number,
+    limit?: number,
+    search?: string
+  ): Promise<{
+    carousels: Carousel[]
+    total: number
+    page: number
+    limit: number
+    totalPages: number
+    hasPreviousPage: boolean
+    hasNextPage: boolean
+  }>
   getEnrolledUsers(
     page: number,
     limit: number,
@@ -58,27 +70,7 @@ export interface IAdminRepository {
     hasNextPage: boolean
   }>
 
-  createSubject({
-    name,
-    description,
-    difficulty,
-    duration,
-    imageUrl,
-    courseType,
-    tags,
-    badge,
-    students
-  }: {
-    name: string
-    description?: string
-    difficulty?: string
-    duration?: string
-    imageUrl?: string
-    courseType?: string
-    tags?: string[]
-    badge?: string
-    students?: number
-  }): Promise<void>
+  createSubject({ name, description }: { name: string; description?: string }): Promise<void>
 
   deleteSubject({ subjectId }: { subjectId: string }): Promise<void>
 
@@ -103,24 +95,27 @@ export interface IAdminRepository {
   editSubject({
     subjectId,
     name,
-    description,
-    difficulty,
-    duration,
-    imageUrl,
-    courseType,
-    tags,
-    badge,
-    students
+    description
   }: {
     subjectId: string
     name?: string
     description?: string
-    difficulty?: string
-    duration?: string
-    imageUrl?: string
-    courseType?: string
-    tags?: string[]
-    badge?: string
-    students?: number
   }): Promise<void>
+
+  // Get all users for CSV export (no pagination)
+  getAllUsersForExport(): Promise<User[]>
+
+  // Import users from CSV
+  importUsers(users: any[]): Promise<void>
+
+  // Get dashboard statistics
+  getDashboardStats(): Promise<{
+    totalUsers: number
+    totalEnrollments: number
+    totalSubjects: number
+    totalContacts: number
+    recentUsers: User[]
+    usersByRole: Array<{ role: string; count: number }>
+    monthlySignups: Array<{ month: string; count: number }>
+  }>
 }
