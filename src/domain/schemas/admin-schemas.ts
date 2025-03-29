@@ -5,6 +5,7 @@ export const userSchema = Type.Object({
   fullName: Type.String(),
   email: Type.String({ format: 'email' }),
   isVerified: Type.Boolean(),
+  phoneNumber: Type.String(),
   role: Type.String(),
   createdAt: Type.String({ format: 'date-time' }),
   updatedAt: Type.String({ format: 'date-time' })

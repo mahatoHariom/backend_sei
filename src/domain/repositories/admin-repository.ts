@@ -204,6 +204,7 @@ export class PrismaAdminRepository implements IAdminRepository {
         where: whereClause,
         skip,
         take: limit,
+
         orderBy: {
           createdAt: 'desc'
         }
