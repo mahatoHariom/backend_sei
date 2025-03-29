@@ -37,8 +37,8 @@ export class AuthController {
         id: user.id,
         email: user.email,
         role: user.role,
-        isVerified: user.isVerified,
-        userDetail: user.userDetail
+        isVerified: user.isVerified
+        // userDetail: user.userDetail
       }),
       {
         path: '/',
