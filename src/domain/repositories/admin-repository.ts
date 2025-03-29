@@ -193,7 +193,8 @@ export class PrismaAdminRepository implements IAdminRepository {
       ? {
           OR: [
             { fullName: { contains: search, mode: 'insensitive' } },
-            { email: { contains: search, mode: 'insensitive' } }
+            { email: { contains: search, mode: 'insensitive' } },
+            { phoneNumber: { contains: search, mode: 'insensitive' } }
           ]
         }
       : {}

@@ -7,6 +7,7 @@ export const createUserSchema = Type.Object({
   email: Type.String({ format: 'email' }),
   password: Type.String({ minLength: 6 }),
   fullName: Type.String(),
+  phoneNumber: Type.String(),
   confirmPassword: Type.String({ minLength: 6 })
 })
 
@@ -15,6 +16,7 @@ export const createUserResponseSchema = Type.Object({
   id: Type.String(),
   email: Type.String(),
   fullName: Type.String(),
+  phoneNumber: Type.Optional(Type.String()),
   isVerified: Type.Boolean(),
   role: Type.Enum(UserRole),
   createdAt: Type.String({ format: 'date-time' }),
