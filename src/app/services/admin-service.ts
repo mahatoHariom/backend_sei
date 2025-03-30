@@ -154,10 +154,10 @@ export class AdminService {
 
     // Transform user data to CSV rows
     const rows = users.map((user) => {
-      // Get subjects from enrollments if available
-      const subjects = user.enrollments
-        ? user.enrollments
-            .map((enrollment) => enrollment.subject?.name || '')
+      // Get subjects from user's subject relationships if available
+      const subjects = user.subjects
+        ? user.subjects
+            .map((subjectRelation) => subjectRelation.subject?.name || '')
             .filter(Boolean)
             .join('; ')
         : ''

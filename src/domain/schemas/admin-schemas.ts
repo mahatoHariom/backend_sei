@@ -5,7 +5,7 @@ const subjectSchema = Type.Object({
   name: Type.String()
 })
 
-const enrollmentSchema = Type.Object({
+const userSubjectSchema = Type.Object({
   id: Type.String(),
   subject: subjectSchema,
   createdAt: Type.String({ format: 'date-time' })
@@ -25,7 +25,7 @@ export const userSchema = Type.Object({
   role: Type.String(),
   createdAt: Type.String({ format: 'date-time' }),
   updatedAt: Type.String({ format: 'date-time' }),
-  enrollments: Type.Optional(Type.Array(enrollmentSchema))
+  subjects: Type.Optional(Type.Array(userSubjectSchema))
 })
 
 export const userEnrollmentSchema = Type.Object({

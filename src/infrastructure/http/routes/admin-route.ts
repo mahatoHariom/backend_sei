@@ -316,7 +316,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
             type: 'object',
             properties: {
               totalUsers: { type: 'number' },
-              totalEnrollments: { type: 'number' },
+              totalEnrollments: { type: 'number', description: 'Total number of subject enrollments' },
               totalSubjects: { type: 'number' },
               totalContacts: { type: 'number' },
               recentUsers: {

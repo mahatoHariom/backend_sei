@@ -206,7 +206,7 @@ export class PrismaAdminRepository implements IAdminRepository {
         skip,
         take: limit,
         include: {
-          enrollments: {
+          subjects: {
             include: {
               subject: {
                 select: {
@@ -370,7 +370,7 @@ export class PrismaAdminRepository implements IAdminRepository {
   async getAllUsersForExport(): Promise<User[]> {
     return this.prisma.user.findMany({
       include: {
-        enrollments: {
+        subjects: {
           include: {
             subject: {
               select: {
