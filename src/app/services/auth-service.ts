@@ -15,9 +15,11 @@ interface AuthenticateRequest {
 interface RegisterRequest {
   email: string
   fullName: string
+  phoneNumber: string
+  schoolCollegeName: string
+  subjectIds: string[]
   password: string
   confirmPassword: string
-  phoneNumber: string
 }
 
 @injectable()
@@ -39,7 +41,15 @@ export class AuthService {
     return user
   }
 
-  async register({ email, fullName, password, confirmPassword, phoneNumber }: RegisterRequest) {
+  async register({
+    email,
+    fullName,
+    phoneNumber,
+    schoolCollegeName,
+    subjectIds,
+    password,
+    confirmPassword
+  }: RegisterRequest) {
     if (password !== confirmPassword) {
       throw new ApiError(Messages.PASSWORD_NOT_MATCHED, StatusCode.Forbidden)
     }
@@ -48,8 +58,24 @@ export class AuthService {
       email,
       fullName,
       password: hashedPassword,
-      phoneNumber
+      phoneNumber,
+      schoolCollegeName
     })
+
+    // Enroll user in selected subjects
+    if (subjectIds && subjectIds.length > 0) {
+      await Promise.all(
+        subjectIds.map(async (subjectId) => {
+          try {
+            await this.authRepository.createUserSubjectEnrollment(user.id, subjectId)
+          } catch (error) {
+            console.error(`Failed to enroll user in subject ${subjectId}:`, error)
+            // We'll continue with the registration even if subject enrollment fails
+          }
+        })
+      )
+    }
+
     return user
   }
   async getProfileData(userId: string): Promise<User | null> {

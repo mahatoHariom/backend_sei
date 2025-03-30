@@ -53,8 +53,16 @@ export class AuthController {
   }
 
   async register(request: FastifyRequest<{ Body: CreateUserInput }>, reply: FastifyReply) {
-    const { email, fullName, password, confirmPassword, phoneNumber } = request.body
-    const user = await this.authService.register({ email, fullName, password, confirmPassword, phoneNumber })
+    const { email, fullName, password, confirmPassword, phoneNumber, schoolCollegeName, subjectIds } = request.body
+    const user = await this.authService.register({
+      email,
+      fullName,
+      password,
+      confirmPassword,
+      phoneNumber,
+      schoolCollegeName,
+      subjectIds
+    })
 
     reply.setCookie(
       'user',

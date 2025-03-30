@@ -23,4 +23,13 @@ export class PrismaAuthRepository implements IAuthRepository {
       where: { id }
     })
   }
+
+  async createUserSubjectEnrollment(userId: string, subjectId: string): Promise<void> {
+    await this.prisma.userSubject.create({
+      data: {
+        userId,
+        subjectId
+      }
+    })
+  }
 }
