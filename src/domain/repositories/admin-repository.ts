@@ -194,7 +194,8 @@ export class PrismaAdminRepository implements IAdminRepository {
           OR: [
             { fullName: { contains: search, mode: 'insensitive' } },
             { email: { contains: search, mode: 'insensitive' } },
-            { phoneNumber: { contains: search, mode: 'insensitive' } }
+            { phoneNumber: { contains: search, mode: 'insensitive' } },
+            { schoolCollegeName: { contains: search, mode: 'insensitive' } }
           ]
         }
       : {}
@@ -204,7 +205,18 @@ export class PrismaAdminRepository implements IAdminRepository {
         where: whereClause,
         skip,
         take: limit,
-
+        include: {
+          enrollments: {
+            include: {
+              subject: {
+                select: {
+                  id: true,
+                  name: true
+                }
+              }
+            }
+          }
+        },
         orderBy: {
           createdAt: 'desc'
         }
@@ -357,6 +369,18 @@ export class PrismaAdminRepository implements IAdminRepository {
 
   async getAllUsersForExport(): Promise<User[]> {
     return this.prisma.user.findMany({
+      include: {
+        enrollments: {
+          include: {
+            subject: {
+              select: {
+                id: true,
+                name: true
+              }
+            }
+          }
+        }
+      },
       orderBy: {
         createdAt: 'desc'
       }

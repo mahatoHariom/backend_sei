@@ -1,17 +1,34 @@
 import { Type } from '@sinclair/typebox'
 
+const subjectSchema = Type.Object({
+  id: Type.String(),
+  name: Type.String()
+})
+
+const enrollmentSchema = Type.Object({
+  id: Type.String(),
+  subject: subjectSchema,
+  createdAt: Type.String({ format: 'date-time' })
+})
+
 export const userSchema = Type.Object({
   id: Type.String(),
   fullName: Type.String(),
   email: Type.String({ format: 'email' }),
   isVerified: Type.Boolean(),
-  phoneNumber: Type.String(),
+  phoneNumber: Type.Optional(Type.String()),
+  address: Type.Optional(Type.String()),
+  fatherName: Type.Optional(Type.String()),
+  motherName: Type.Optional(Type.String()),
+  parentContact: Type.Optional(Type.String()),
+  schoolCollegeName: Type.Optional(Type.String()),
   role: Type.String(),
   createdAt: Type.String({ format: 'date-time' }),
-  updatedAt: Type.String({ format: 'date-time' })
+  updatedAt: Type.String({ format: 'date-time' }),
+  enrollments: Type.Optional(Type.Array(enrollmentSchema))
 })
 
-export const enrollmentSchema = Type.Object({
+export const userEnrollmentSchema = Type.Object({
   user: Type.Object({
     id: Type.String(),
     fullName: Type.String(),
@@ -26,7 +43,7 @@ export const enrollmentSchema = Type.Object({
 })
 
 export const getEnrolledUsersResponseSchema = Type.Object({
-  enrollments: Type.Array(enrollmentSchema),
+  enrollments: Type.Array(userEnrollmentSchema),
   total: Type.Number(),
   page: Type.Number(),
   limit: Type.Number(),

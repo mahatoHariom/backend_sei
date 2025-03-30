@@ -147,12 +147,21 @@ export class AdminService {
       'fatherName',
       'parentContact',
       'schoolCollegeName',
+      'subjects',
       'createdAt',
       'updatedAt'
     ].join(',')
 
     // Transform user data to CSV rows
     const rows = users.map((user) => {
+      // Get subjects from enrollments if available
+      const subjects = user.enrollments
+        ? user.enrollments
+            .map((enrollment) => enrollment.subject?.name || '')
+            .filter(Boolean)
+            .join('; ')
+        : ''
+
       const values = [
         user.id,
         user.fullName || '',
@@ -164,6 +173,7 @@ export class AdminService {
         user.fatherName || '',
         user.parentContact || '',
         user.schoolCollegeName || '',
+        subjects,
         user.createdAt.toISOString(),
         user.updatedAt.toISOString()
       ].map((value) => `"${String(value).replace(/"/g, '""')}"`) // Escape quotes
@@ -198,61 +208,72 @@ export class AdminService {
       'schoolCollegeName'
     ]
 
-    // Validate required headers
-    if (!headers.includes('email') || !headers.includes('fullName')) {
-      throw new Error('CSV must contain at least email and fullName columns')
+    // Verify essential headers exist (email at minimum is required)
+    if (!headers.includes('email')) {
+      throw new Error('CSV file must contain an email column')
     }
 
-    // Process each row
+    // Parse data rows
     const users = []
     for (let i = 1; i < lines.length; i++) {
       if (!lines[i].trim()) continue // Skip empty lines
 
       const values = this.parseCSVLine(lines[i])
-      const user: any = {}
+      if (values.length !== headers.length) {
+        console.warn(`Skipping row ${i + 1}: Column count mismatch`)
+        continue
+      }
 
-      // Map values to user object based on headers
+      const user: Record<string, any> = {
+        isVerified: true
+      }
+
+      // Map values to headers
       headers.forEach((header, index) => {
-        if (expectedHeaders.includes(header) && values[index]) {
-          user[header] = values[index].replace(/^"(.*)"$/, '$1') // Remove quotes
+        // Only include fields that are expected or add any custom handling
+        if (expectedHeaders.includes(header)) {
+          // Trim and clean the value
+          const value = values[index].replace(/^"(.*)"$/, '$1').trim()
+          user[header] = value || undefined
         }
       })
 
-      if (user.email && user.fullName) {
-        users.push(user)
-      }
+      users.push(user)
     }
 
-    // Save users to database
-    if (users.length > 0) {
-      await this.adminRepository.importUsers(users)
-    }
+    await this.adminRepository.importUsers(users)
   }
 
-  // Helper method to properly parse CSV lines (handling quoted fields with commas)
+  // Helper method to correctly parse CSV lines with quoted fields
   private parseCSVLine(line: string): string[] {
     const result = []
-    let current = ''
     let inQuotes = false
+    let currentValue = ''
 
     for (let i = 0; i < line.length; i++) {
       const char = line[i]
 
       if (char === '"') {
-        // Toggle quote state
-        inQuotes = !inQuotes
+        if (i + 1 < line.length && line[i + 1] === '"') {
+          // Handle escaped quotes (double quotes)
+          currentValue += '"'
+          i++ // Skip the next quote
+        } else {
+          // Toggle quote state
+          inQuotes = !inQuotes
+        }
       } else if (char === ',' && !inQuotes) {
-        // End of field, not inside quotes
-        result.push(current)
-        current = ''
+        // End of field
+        result.push(currentValue)
+        currentValue = ''
       } else {
-        // Add character to current field
-        current += char
+        currentValue += char
       }
     }
 
-    // Add the last field
-    result.push(current)
+    // Don't forget the last field
+    result.push(currentValue)
+
     return result
   }
 
